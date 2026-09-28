@@ -6,6 +6,10 @@ A calm, glass-inspired companion for your AI usage. Native Kotlin and Jetpack Co
 
 Android 9 or newer. This is a sideloaded APK, not a Play Store listing. No subscription or cloud account is required by UsageNotch.
 
+<img src="docs/images/onboarding.png" width="260" alt="UsageNotch Android pairing screen" /> <img src="docs/images/overview-tablet.png" width="420" alt="Adaptive overview showing Claude and Codex with clearly labelled sample data" />
+
+Actual app views rendered in Android UI tests. The overview illustration uses explicitly labelled sample data.
+
 ## Get connected
 
 1. On Android, download `UsageNotch-1.0.0.apk` from Releases. Open it and permit installation from your browser/file manager when Android asks.
