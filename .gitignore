@@ -1,0 +1,17 @@
+.gradle/
+.kotlin/
+**/build/
+local.properties
+.idea/
+*.jks
+*.keystore
+*.pfx
+*.pairing
+*.usagenotch
+*.dpapi
+signing.properties
+artifacts/
+**/bin/
+**/obj/
+.tools/
+*.log

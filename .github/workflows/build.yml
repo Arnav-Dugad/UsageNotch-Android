@@ -1,0 +1,42 @@
+name: Verify Android and Windows Link
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew && ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-verification
+          path: |
+            app/build/reports
+            app/build/screenshots
+            app/build/outputs/apk/debug/*.apk
+  companion:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build companion/UsageNotch.Link.csproj -c Release
+      - run: dotnet companion/bin/Release/net8.0-windows/UsageNotch.Link.dll --self-test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-verification
+          path: companion/bin/Release/net8.0-windows/verification.txt

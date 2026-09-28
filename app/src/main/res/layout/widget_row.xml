@@ -1,0 +1,5 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="4dp" android:paddingBottom="0dp">
+    <TextView android:id="@+id/row_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#EDF5FF" android:textSize="12sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+    <ProgressBar android:id="@+id/row_bar" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="3dp" android:layout_marginTop="3dp" android:max="100" android:progressTint="#ABE7DD" android:progressBackgroundTint="#354257" />
+    <TextView android:id="@+id/row_detail" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:textColor="#B4C2D6" android:textSize="11sp" android:maxLines="2" android:ellipsize="end" />
+</LinearLayout>

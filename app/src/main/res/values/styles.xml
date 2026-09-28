@@ -1,0 +1,9 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">#09111F</item><item name="android:colorAccent">#ABE7DD</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <string name="app_name">UsageNotch</string>
+    <string name="widget_description">Your AI usage windows, kept distinct. Tap refresh for the latest reading from your PC.</string>
+</resources>
