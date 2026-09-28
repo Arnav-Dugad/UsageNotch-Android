@@ -2,7 +2,7 @@
 
 A calm, glass-inspired companion for your AI usage. Native Kotlin and Jetpack Compose, with soft light, animated rings, spring motion and home-screen widgets.
 
-**[Download the Android APK and Windows Link companion](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest)**
+**[Download the Android APK and Windows Link companion](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest)** (1.0.1)
 
 Android 9 or newer. This is a sideloaded APK, not a Play Store listing. No subscription or cloud account is required by UsageNotch.
 
@@ -12,7 +12,7 @@ Actual app views rendered in Android UI tests. The overview illustration uses ex
 
 ## Get connected
 
-1. On Android, download `UsageNotch-1.0.0.apk` from Releases. Open it and permit installation from your browser/file manager when Android asks.
+1. On Android, download `UsageNotch-1.0.1.apk` from Releases. Open it and permit installation from your browser/file manager when Android asks.
 2. On Windows, keep [UsageNotch Windows 2.2.0 or newer](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) running with your providers connected.
 3. Download and extract `UsageNotch-Link-1.0.0-win-x64.zip`. Run `UsageNotch.Link.exe` and click **Start secure link**. If Windows Firewall asks, allow it on your trusted **Private** network.
 4. Choose the PC's Wi-Fi/private VPN address and click **Export pairing file**. Transfer that `.usagenotch` file privately to your phone, for example by USB. It is an access key; do not post it in an issue or public repository.

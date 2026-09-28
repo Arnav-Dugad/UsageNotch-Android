@@ -21,14 +21,19 @@ import androidx.work.*
 import java.util.concurrent.TimeUnit
 
 class NotchApplication : Application() {
-    override fun onCreate() { super.onCreate(); scheduleRefresh(this) }
+    override fun onCreate() {
+        super.onCreate()
+        // A launcher must still be able to open the dashboard if WorkManager is
+        // unavailable on a vendor build. Widget refresh is best effort.
+        runCatching { scheduleRefresh(this) }
+    }
 }
 fun scheduleRefresh(context: Context) {
     val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
     WorkManager.getInstance(context).enqueueUniquePeriodicWork("usage-periodic", ExistingPeriodicWorkPolicy.KEEP, request)
 }
 fun requestRefresh(context: Context) {
-    WorkManager.getInstance(context).enqueueUniqueWork("usage-refresh", ExistingWorkPolicy.KEEP, OneTimeWorkRequestBuilder<SyncWorker>().build())
+    runCatching { WorkManager.getInstance(context).enqueueUniqueWork("usage-refresh", ExistingWorkPolicy.KEEP, OneTimeWorkRequestBuilder<SyncWorker>().build()) }
 }
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {

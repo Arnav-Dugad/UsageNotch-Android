@@ -50,7 +50,17 @@ private val Backdrop = Color(0xFF09111F)
 internal fun providerColor(id: String) = when (id) { "claude" -> Peach; "codex" -> Mint; "gemini" -> Lavender; else -> Color(0xFFA9CFF5) }
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); enableEdgeToEdge(); setContent { NotchTheme { NotchApp() } } }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        runCatching { enableEdgeToEdge() }
+        setContent {
+            NotchTheme {
+                // WorkManager and the LAN link are optional. The dashboard must
+                // remain usable when a device vendor blocks background services.
+                NotchApp()
+            }
+        }
+    }
 }
 @Composable fun NotchTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = darkColorScheme(primary = Mint, onPrimary = Backdrop, primaryContainer = Color(0xFF22433F), onPrimaryContainer = Mint, secondary = Lavender, background = Backdrop, surface = Color(0xFF172336), onSurface = Ink, onSurfaceVariant = Muted), content = content)
