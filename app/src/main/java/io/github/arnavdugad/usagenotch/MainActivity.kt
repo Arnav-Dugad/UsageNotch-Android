@@ -74,8 +74,17 @@ internal fun readBounded(stream: InputStream, max: Int): ByteArray {
     LaunchedEffect(owner) {
         owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             reload()
-            if (repo.pairing() != null) { repo.refresh(); reload(); updateWidgets(context) }
-            while (isActive) { now = System.currentTimeMillis(); delay(1000) }
+            // Keep clocks responsive while the network is slow; reflect worker updates while open.
+            launch { if (repo.pairing() != null) { repo.refresh(); reload(); updateWidgets(context) } }
+            var seenSync = repo.lastSync()
+            var seenError = repo.error()
+            while (isActive) {
+                now = System.currentTimeMillis()
+                val currentSync = repo.lastSync()
+                val currentError = repo.error()
+                if (currentSync != seenSync || currentError != seenError) { seenSync = currentSync; seenError = currentError; reload() }
+                delay(1000)
+            }
         }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
