@@ -37,15 +37,16 @@ class UiTest {
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithText("Pair your Windows PC").assertExists()
         screenshot("04-settings")
-        compose.onNodeWithContentDescription("Show remaining").performScrollTo().performClick()
+        scrollTo("Show remaining"); compose.onNodeWithContentDescription("Show remaining").performClick()
         compose.onNodeWithContentDescription("Show remaining").assertIsOff()
     }
     @Test @Config(qualifiers = "w320dp-h640dp-hdpi") fun smallScreenRemainsNavigable() {
         compose.setContent { NotchTheme { NotchApp() } }
         compose.onNodeWithText("Import PC pairing").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Settings").performClick()
-        compose.onNodeWithContentDescription("24-hour clock").performScrollTo().performClick().assertIsOn()
-        compose.onNodeWithContentDescription("Reduce motion").performScrollTo().performClick().assertIsOn()
+        scrollTo("24-hour clock"); compose.onNodeWithContentDescription("24-hour clock").performClick().assertIsOn()
+        scrollTo("Reduce motion"); compose.onNodeWithContentDescription("Reduce motion").performClick().assertIsOn()
+        scrollTo("Reset alerts"); compose.onNodeWithContentDescription("Reset alerts").assertIsOff()
         screenshot("05-small-screen-settings")
     }
     @Test @Config(qualifiers = "w840dp-h1100dp-xhdpi") fun tabletShowsBothProviders() {
@@ -76,6 +77,22 @@ class UiTest {
         val focus=buildWidgetViews(context,100,true).apply(context,android.widget.FrameLayout(context))
         assertEquals(2,focus.findViewById<android.widget.LinearLayout>(R.id.widget_rows).childCount)
     }
+    @Test fun widgetShowsRenewedWindowsInsteadOfStalePercentages() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val now = System.currentTimeMillis()
+        val fixture = """{"schema":1,"generatedAt":$now,"providers":[{"id":"claude","name":"Claude","status":"Ok","windows":[{"id":"five_hour","label":"5-hour window","used":0.93,"at":${now-7200000},"reset":${now-600000},"points":[]},{"id":"seven_day","label":"Weekly window","used":0.41,"at":${now-7200000},"reset":${now+172800000},"points":[]}]}]}"""
+        context.getSharedPreferences("usage", 0).edit().putString("snapshot", fixture).putLong("sync", now - 7200000).putBoolean("offline", true).commit()
+        val view = buildWidgetViews(context, 101, true).apply(context, android.widget.FrameLayout(context))
+        val rows = view.findViewById<android.widget.LinearLayout>(R.id.widget_rows)
+        assertEquals("Claude", view.findViewById<android.widget.TextView>(R.id.widget_title).text.toString())
+        val first = rows.getChildAt(0)
+        assertEquals("Renewed", first.findViewById<android.widget.TextView>(R.id.row_title).text.toString())
+        assertFalse(first.findViewById<android.widget.TextView>(R.id.row_title).text.contains("7%"))
+        assertEquals(android.view.View.GONE, first.findViewById<android.view.View>(R.id.row_bar).visibility)
+        assertTrue(rows.getChildAt(1).findViewById<android.widget.TextView>(R.id.row_title).text.contains("59% left"))
+    }
+    /** Settings is a lazy list: items off screen are not composed until the list scrolls to them. */
+    private fun scrollTo(description: String) = compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasContentDescription(description))
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val file = File("build/screenshots/$name.png"); file.parentFile!!.mkdirs()

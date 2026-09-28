@@ -34,7 +34,7 @@ class ModelTest {
         val p = Snapshot.parse(raw).providers.single()
         assertEquals(listOf(80,30), p.windows.map { it.percent(true) })
         assertEquals(listOf(20,70), p.windows.map { it.percent(false) })
-        assertEquals("Reset due · saved reading", readingState(p, p.windows[0], 3000))
+        assertEquals("Limit renewed", readingState(p, p.windows[0], 3000))
         assertEquals(20, p.windows[0].percent(false))
         assertEquals("Saved reading", readingState(p.copy(status = "NeedsAuth"), p.windows[1], 1500))
         assertThrows(Exception::class.java) { Snapshot.parse(raw.replace("0.2", "-0.2")) }

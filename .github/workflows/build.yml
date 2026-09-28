@@ -20,7 +20,22 @@ jobs:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
-      - run: chmod +x gradlew && ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
+      - run: chmod +x gradlew && ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleSmoke --no-daemon
+      # Unit tests run the unminified debug build; only a real launch of the R8-optimized build catches stripped classes.
+      - name: Enable KVM for the Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch the optimized build on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: bash packaging/launch-check.sh app/build/outputs/apk/smoke/app-smoke.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -29,6 +44,7 @@ jobs:
             app/build/reports
             app/build/screenshots
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/smoke/*.apk
   companion:
     runs-on: windows-latest
     steps:
