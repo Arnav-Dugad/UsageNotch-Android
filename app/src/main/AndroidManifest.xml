@@ -45,6 +45,7 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/focus_widget" />
         </receiver>
         <receiver android:name=".ResetAlertReceiver" android:exported="false" />
+        <receiver android:name=".RecapReceiver" android:exported="false" />
         <!-- Exported only for these system-protected broadcasts, which other apps cannot send. -->
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

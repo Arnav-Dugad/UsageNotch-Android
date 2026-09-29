@@ -117,9 +117,29 @@ object Logos {
 }
 
 /**
+ * Provider accent colours: each provider's brand colour until you pick another. They tint the ambient light,
+ * charts and glass; rings keep the usage ramp so their colour always means how much is used.
+ */
+object Accents {
+    private val brand = mapOf("claude" to 0xFFD97757.toInt(), "anthropic-api" to 0xFFD97757.toInt(), "codex" to 0xFF10A37F.toInt(), "openai-api" to 0xFF10A37F.toInt(),
+        "gemini" to 0xFF4796E3.toInt(), "cursor" to 0xFF9A7CFF.toInt())
+    val choices = listOf(0xFFD97757, 0xFFFF6B6B, 0xFFFFB547, 0xFF34C759, 0xFF10A37F, 0xFF32ADE6, 0xFF4796E3, 0xFF7A5CFF, 0xFFBF5AF2, 0xFFFF2D92).map { it.toInt() }
+    fun default(id: String) = brand[providerKind(id)] ?: 0xFF8E8E93.toInt()
+    fun of(prefs: android.content.SharedPreferences, id: String) = prefs.getInt("accent-${providerKind(id)}", default(id))
+    fun set(prefs: android.content.SharedPreferences, id: String, color: Int?) {
+        prefs.edit().apply { if (color == null) remove("accent-${providerKind(id)}") else putInt("accent-${providerKind(id)}", color) }.apply()
+    }
+}
+/** The accent for a provider id, supplied by the app so a change recolours everything at once. */
+val LocalAccent = staticCompositionLocalOf<(String) -> Color> { { Color(Accents.default(it)) } }
+
+/**
  * The desktop dock ring: a quiet track, a usage arc from 12 o'clock coloured by how much is used, an optional
  * inner ring for the weekly window, and the provider's logo in the centre. Drawn on a platform Canvas so the
  * app and the home-screen widgets share exactly the same rendering.
+ *
+ * The arc is a comet: it brightens from a faint tail to its head. A hairline arc outside the ring shows how much of
+ * the window's time is left before it resets, and a short tick marks your budget.
  */
 object RingPainter {
     class Spec(
@@ -129,14 +149,32 @@ object RingPainter {
         val glow: Float = 0f,
         /** A bright head on the arc while a new reading sweeps in. */
         val head: Boolean = false,
+        /** 0..1 of the window's period still to run before its reset, or null when unknown. */
+        val timeLeft: Float? = null,
+        /** Budget position on the arc (0..1, in the same terms as [shown]), or null. */
+        val budget: Float? = null,
+        val ink: Int = 0xFFFFFFFF.toInt(),
     )
     fun draw(canvas: Canvas, cx: Float, cy: Float, size: Float, density: Float, spec: Spec) {
         if (size < 8f) return
         // Per call: widgets render on background threads while the app draws on the main thread.
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
         val stroke = (size * 0.052f).coerceIn(1.8f * density, 4.2f * density)
-        val radius = size / 2 - stroke / 2 - size * 0.045f
+        val timeLeft = spec.timeLeft?.takeIf { size >= 36f * density }
+        var radius = size / 2 - stroke / 2 - size * 0.045f
+        if (timeLeft != null) radius -= stroke * .9f
         val shownPrimary = if (spec.renewed) null else spec.shown
+        if (timeLeft != null) {
+            val timeRadius = radius + stroke * 1.25f
+            val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = max(1f * density, stroke * .28f) }
+            timePaint.color = (spec.ink and 0x00FFFFFF) or 0x1F000000
+            canvas.drawCircle(cx, cy, timeRadius, timePaint)
+            val left = timeLeft.coerceIn(0f, 1f)
+            if (left > 0.004f) {
+                timePaint.color = (spec.ink and 0x00FFFFFF) or 0x8C000000.toInt()
+                canvas.drawArc(RectF(cx - timeRadius, cy - timeRadius, cx + timeRadius, cy + timeRadius), -90f, left * 360f, false, timePaint)
+            }
+        }
         if (spec.glow > 0f && shownPrimary != null && shownPrimary > 0f) {
             val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = stroke * 2.2f
@@ -146,6 +184,12 @@ object RingPainter {
             canvas.drawArc(RectF(cx - radius, cy - radius, cx + radius, cy + radius), -90f, shownPrimary.coerceIn(0f, 1f) * 360f, false, glow)
         }
         ring(canvas, paint, cx, cy, radius, stroke, spec.track, shownPrimary, spec.used)
+        spec.budget?.takeIf { it in 0f..1f && !spec.renewed }?.let { b ->
+            val a = Math.toRadians(-90.0 + b * 360.0)
+            val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = max(1.2f * density, stroke * .34f); color = spec.ink }
+            val r0 = radius - stroke * .95f; val r1 = radius + stroke * .95f
+            canvas.drawLine(cx + r0 * cos(a).toFloat(), cy + r0 * sin(a).toFloat(), cx + r1 * cos(a).toFloat(), cy + r1 * sin(a).toFloat(), tick)
+        }
         if (spec.head && shownPrimary != null && shownPrimary > 0.01f) {
             val a = Math.toRadians(-90.0 + shownPrimary.coerceIn(0f, 1f) * 360.0)
             val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0xE6FFFFFF.toInt() }
@@ -170,18 +214,33 @@ object RingPainter {
         }
     }
     private fun ring(canvas: Canvas, paint: Paint, cx: Float, cy: Float, radius: Float, stroke: Float, track: Int, shown: Float?, used: Double?) {
-        paint.strokeWidth = stroke; paint.color = track
+        paint.shader = null; paint.strokeWidth = stroke; paint.color = track
         canvas.drawCircle(cx, cy, radius, paint)
         val fraction = shown ?: return
         if (!fraction.isFinite() || fraction <= 0f) return
-        paint.color = Palette.usage(used ?: 0.0)
-        if (fraction >= 0.9999f) { canvas.drawCircle(cx, cy, radius, paint); return }
+        val color = Palette.usage(used ?: 0.0)
+        paint.color = color
+        if (fraction >= 0.985f) { canvas.drawCircle(cx, cy, radius, paint); return }
+        paint.shader = comet(cx, cy, radius, stroke, fraction.coerceIn(0f, 1f), color)
         canvas.drawArc(RectF(cx - radius, cy - radius, cx + radius, cy + radius), -90f, fraction.coerceIn(0f, 1f) * 360f, false, paint)
+        paint.shader = null
+    }
+    /** Faint tail to full head. The gradient starts half a stroke before 12 o'clock so the tail's rounded cap stays faint. */
+    internal fun comet(cx: Float, cy: Float, radius: Float, stroke: Float, fraction: Float, color: Int): android.graphics.SweepGradient {
+        val cap = Math.toDegrees((stroke / 2 / radius).toDouble()).toFloat()
+        val head = ((cap + fraction * 360f) / 360f).coerceIn(0.02f, 0.97f)
+        val tail = (color and 0x00FFFFFF) or 0x40000000
+        return android.graphics.SweepGradient(cx, cy, intArrayOf(tail, color, color, tail), floatArrayOf(0f, head, (head + .02f).coerceAtMost(.99f), 1f)).apply {
+            setLocalMatrix(android.graphics.Matrix().apply { setRotate(-90f - cap, cx, cy) })
+        }
     }
     /** Ring inputs for a provider, following the dock: outer ring the session window, inner ring the weekly one. */
-    fun specFor(p: Provider, remaining: Boolean, now: Long, track: Int, logo: Drawable?, primary: Float? = null, secondary: Float? = null, glow: Float = 0f, head: Boolean = false): Spec {
+    fun specFor(p: Provider, remaining: Boolean, now: Long, track: Int, logo: Drawable?, primary: Float? = null, secondary: Float? = null, glow: Float = 0f, head: Boolean = false,
+                ink: Int = 0xFFFFFFFF.toInt(), budget: Budget? = null, showTime: Boolean = true): Spec {
         val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
+        val budgetShown = budget?.takeIf { s != null && it.window == s.id }?.let { (if (remaining) 1f - it.limit / 100f else it.limit / 100f).coerceIn(0f, 1f) }
         return Spec(primary ?: s?.shown(remaining)?.toFloat(), s?.used, w?.let { secondary ?: it.shown(remaining).toFloat() }, w?.used,
-            p.status, s?.resetPassed(now) == true, track, logo, glow = glow, head = head)
+            p.status, s?.resetPassed(now) == true, track, logo, glow = glow, head = head,
+            timeLeft = if (showTime) s?.timeLeft(now) else null, budget = budgetShown, ink = ink)
     }
 }

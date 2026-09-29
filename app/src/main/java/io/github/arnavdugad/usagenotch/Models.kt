@@ -1,5 +1,6 @@
 package io.github.arnavdugad.usagenotch
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.time.Instant
@@ -32,7 +33,7 @@ data class Day(val date: String, val used: Double?)
  * 30 days of one window from the PC: daily consumption, a weekday x hour heatmap (index weekday*24+hour, Sunday first),
  * the number of distinct observed hours per cell (so missing data is never shown as quiet), and the current streak.
  */
-data class History(val window: String, val label: String, val days: List<Day>, val heat: List<Double>, val observed: List<Int>, val streak: Int) {
+data class History(val window: String, val label: String, val days: List<Day>, val heat: List<Double>, val observed: List<Int>, val streak: Int, val calendar: List<Day> = emptyList()) {
     fun last(n: Int) = days.takeLast(n)
     /** The busiest observed cells, most first, as (weekday 0=Sunday, hour, consumption). */
     fun busiest(count: Int = 3) = heat.indices.filter { observed.getOrElse(it) { 0 } > 0 && heat[it] > .0001 }.sortedByDescending { heat[it] }.take(count).map { Triple(it / 24, it % 24, heat[it]) }
@@ -68,10 +69,12 @@ data class Snapshot(val generatedAt: Long, val providers: List<Provider>, val so
             val list = p.optJSONArray("history") ?: return emptyList()
             return (0 until minOf(list.length(), 4)).mapNotNull { i -> runCatching {
                 val h = list.getJSONObject(i); val days = h.getJSONArray("days"); val heat = h.getJSONArray("heat"); val observed = h.getJSONArray("observed")
-                require(days.length() <= 60 && heat.length() == 168 && observed.length() == 168)
-                History(h.getString("window").take(100), h.getString("label").take(80),
-                    (0 until days.length()).map { d -> val day = days.getJSONObject(d); Day(day.getString("date").take(10), if (day.isNull("used") || !day.has("used")) null else day.getDouble("used").takeIf { it.isFinite() && it >= 0 }) },
-                    (0 until 168).map { heat.getDouble(it).takeIf { v -> v.isFinite() && v >= 0 } ?: 0.0 }, (0 until 168).map { observed.getInt(it).coerceAtLeast(0) }, h.optInt("streak", 0).coerceIn(0, 10_000))
+                val calendar = h.optJSONArray("calendar")
+                require(days.length() <= 60 && heat.length() == 168 && observed.length() == 168 && (calendar?.length() ?: 0) <= 120)
+                fun daysOf(a: JSONArray) = (0 until a.length()).map { d -> val day = a.getJSONObject(d); Day(day.getString("date").take(10), if (day.isNull("used") || !day.has("used")) null else day.getDouble("used").takeIf { it.isFinite() && it >= 0 }) }
+                History(h.getString("window").take(100), h.getString("label").take(80), daysOf(days),
+                    (0 until 168).map { heat.getDouble(it).takeIf { v -> v.isFinite() && v >= 0 } ?: 0.0 }, (0 until 168).map { observed.getInt(it).coerceAtLeast(0) }, h.optInt("streak", 0).coerceIn(0, 10_000),
+                    calendar?.let { daysOf(it) } ?: emptyList())
             }.getOrNull() }
         }
         /** Internet sync details handed over the pinned local link: the new relay, "off", or null when the PC doesn't say. */

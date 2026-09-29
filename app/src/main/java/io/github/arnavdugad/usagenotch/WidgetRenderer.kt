@@ -16,18 +16,26 @@ import kotlin.math.sqrt
 
 /**
  * Draws a widget at its exact size. Every size gets a layout that fits: a single ring (1×1), a dock row or column
- * of rings like the desktop dock, or the full view with rings and desktop-style limit rows. The background is
- * the widget's own rounded drawable; this bitmap is transparent around the content.
+ * of rings like the desktop dock, or the full view with rings and desktop-style limit rows. The widget's own rounded
+ * drawable is a translucent glass body; this bitmap adds the glass's specular rim and sheen, then the content.
  */
 object WidgetRenderer {
     data class Frame(val widthDp: Float, val heightDp: Float, val density: Float, val maxBytes: Int = MAX_BITMAP_BYTES)
     data class Input(
         val snapshot: Snapshot?, val paired: Boolean, val status: String, val remaining: Boolean, val use24: Boolean,
         val now: Long, val dark: Boolean, val focus: Boolean, val focusId: String?, val offline: Boolean,
+        val budgets: List<Budget> = emptyList(),
     )
-    class Output(val bitmap: Bitmap, val description: String, val full: Boolean)
+    /** [refresh] says whether this layout left the top-right corner free for the refresh button. */
+    class Output(val bitmap: Bitmap, val description: String, val full: Boolean, val refresh: Boolean = full)
 
     const val MAX_BITMAP_BYTES = 5_000_000
+    /** Glass body colours, matching res/drawable/widget_background*.xml, for previews in the app. */
+    const val GLASS_DARK = 0xD6151922.toInt()
+    const val GLASS_LIGHT = 0xE0FAFBFD.toInt()
+    const val CORNER_DP = 24f
+    /** The refresh button's corner, in dp, which layouts keep clear. */
+    const val REFRESH_DP = 34f
 
     private class Ink(dark: Boolean) {
         val text = if (dark) 0xFFF2F4F8.toInt() else 0xFF12151B.toInt()
@@ -53,13 +61,33 @@ object WidgetRenderer {
         val d = density; val ink = Ink(input.dark)
         val providers = providers(input)
         val full = wDp >= 180 && hDp >= 170
+        glass(canvas, wDp, hDp, d, input.dark)
+        // Small widgets open the app when tapped; from about 2×1 up, a refresh button sits in the top-right corner.
+        val refresh = providers.isNotEmpty() && input.paired && (full || (wDp >= 130 && hDp >= 60) || (hDp >= 130 && wDp >= 60))
         when {
             providers.isEmpty() -> empty(context, canvas, wDp, hDp, d, ink, input)
             full && input.focus -> focusFull(context, canvas, wDp, hDp, d, ink, input, providers.first())
             full -> overviewFull(context, canvas, wDp, hDp, d, ink, input, providers)
+            refresh && wDp >= hDp -> dock(context, canvas, 0f, 0f, wDp - REFRESH_DP + 6, hDp, d, ink, input, providers, pad = if (min(wDp, hDp) < 110) 5f else 10f)
+            refresh -> dock(context, canvas, 0f, REFRESH_DP - 6, wDp, hDp - REFRESH_DP + 6, d, ink, input, providers, pad = if (min(wDp, hDp) < 110) 5f else 10f)
             else -> dock(context, canvas, 0f, 0f, wDp, hDp, d, ink, input, providers, pad = if (min(wDp, hDp) < 110) 5f else 10f)
         }
-        return Output(bitmap, describe(input, providers), full)
+        return Output(bitmap, describe(input, providers), full, refresh)
+    }
+
+    /** The glass's light: a soft sheen across the top and a specular rim, bright at the top-left and fading around. */
+    private fun glass(canvas: Canvas, w: Float, h: Float, d: Float, dark: Boolean) {
+        val radius = CORNER_DP * d; val rect = RectF(.5f * d, .5f * d, w * d - .5f * d, h * d - .5f * d)
+        val sheen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, h * d * .55f, if (dark) 0x14FFFFFF else 0x59FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP)
+        }
+        canvas.drawRoundRect(rect, radius, radius, sheen)
+        val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.1f * d
+            shader = android.graphics.LinearGradient(0f, 0f, w * d, h * d, intArrayOf(if (dark) 0x8CFFFFFF.toInt() else 0xF2FFFFFF.toInt(), if (dark) 0x14FFFFFF else 0x40FFFFFF, if (dark) 0x0AFFFFFF else 0x1A000000, if (dark) 0x33FFFFFF else 0x66FFFFFF),
+                floatArrayOf(0f, .35f, .7f, 1f), android.graphics.Shader.TileMode.CLAMP)
+        }
+        canvas.drawRoundRect(rect, radius, radius, rim)
     }
 
     private fun paint(size: Float, color: Int, d: Float, bold: Boolean = false) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -81,8 +109,9 @@ object WidgetRenderer {
         return p.secondaryTag() + " " + if (w.resetPassed(now)) "new" else "${w.percent(remaining)}%"
     }
     private fun ring(context: Context, canvas: Canvas, p: Provider, cx: Float, cy: Float, size: Float, d: Float, ink: Ink, input: Input, dual: Boolean = true) {
-        val spec = RingPainter.specFor(p, input.remaining, input.now, ink.track, Logos.drawable(context, p.id, ink.text))
-        RingPainter.draw(canvas, cx, cy, size, d, if (dual) spec else RingPainter.Spec(spec.shown, spec.used, null, null, spec.status, spec.renewed, spec.track, spec.logo))
+        val budget = input.budgets.firstOrNull { it.provider == p.id && it.window == p.sessionWindow()?.id }
+        val spec = RingPainter.specFor(p, input.remaining, input.now, ink.track, Logos.drawable(context, p.id, ink.text), ink = ink.text, budget = budget)
+        RingPainter.draw(canvas, cx, cy, size, d, if (dual) spec else RingPainter.Spec(spec.shown, spec.used, null, null, spec.status, spec.renewed, spec.track, spec.logo, timeLeft = spec.timeLeft, budget = spec.budget, ink = spec.ink))
     }
 
     private fun empty(context: Context, canvas: Canvas, w: Float, h: Float, d: Float, ink: Ink, input: Input) {
@@ -98,7 +127,7 @@ object WidgetRenderer {
     }
 
     /** A row (wide) or column (tall) of dock cells: ring, percentage and the "7d" figure, as on the desktop dock. */
-    private fun dock(context: Context, canvas: Canvas, x0: Float, y0: Float, w: Float, h: Float, d: Float, ink: Ink, input: Input, providers: List<Provider>, pad: Float) {
+    private fun dock(context: Context, canvas: Canvas, x0: Float, y0: Float, w: Float, h: Float, d: Float, ink: Ink, input: Input, providers: List<Provider>, pad: Float, maxRing: Float = 84f) {
         val horizontal = w >= h
         val main = (if (horizontal) w else h) - pad * 2; val cross = (if (horizontal) h else w) - pad * 2
         val minCell = if (horizontal) 56f else 64f
@@ -106,7 +135,7 @@ object WidgetRenderer {
         val cellMain = main / count
         val big = cross >= 76 && (if (horizontal) cellMain >= 60 else true)
         val textBlock = when { cross - 34 >= 30 && big -> 34f; cross - 17 >= 24 -> 17f; else -> 0f }
-        val ringSize = min(min(if (horizontal) cellMain - 8 else cross - 8, cross - textBlock - 4), 84f).coerceAtLeast(18f)
+        val ringSize = min(min(if (horizontal) cellMain - 8 else cross - 8, cross - textBlock - 4), maxRing).coerceAtLeast(18f)
         for (i in 0 until count) {
             val p = providers[i]
             val cx: Float; val top: Float
@@ -158,13 +187,17 @@ object WidgetRenderer {
 
     private fun overviewFull(context: Context, canvas: Canvas, w: Float, h: Float, d: Float, ink: Ink, input: Input, providers: List<Provider>) {
         val pad = 14f
-        header(canvas, "UsageNotch", input.status, w, d, ink, pad)
-        val dockTop = pad + 38; val dockHeight = min(96f, h - dockTop - pad)
-        dock(context, canvas, 0f, dockTop, w, dockHeight, d, ink, input, providers, pad = pad - 4)
-        var y = dockTop + dockHeight + 6
+        // No title: the status line is all the header needs.
+        text(canvas, input.status, pad * d, (pad + 12) * d, (w - pad * 2 - REFRESH_DP) * d, paint(11f, ink.muted, d))
         // Every provider's session limit first, then the weekly ones, so a short widget still covers each provider.
         val rows = providers.mapNotNull { p -> p.sessionWindow()?.let { p to it } } +
             providers.mapNotNull { p -> p.weeklyWindow()?.takeIf { it.id != p.sessionWindow()?.id }?.let { p to it } }
+        // Tall widgets give the rings the room the rows don't need.
+        val dockTop = pad + 18
+        val spare = h - dockTop - pad - rows.size * 44f - 6
+        val dockHeight = min(if (spare > 100f) min(spare, 170f) else 100f, h - dockTop - pad)
+        dock(context, canvas, 0f, dockTop, w, dockHeight, d, ink, input, providers, pad = pad - 4, maxRing = if (dockHeight > 110f) min(dockHeight - 40f, 124f) else 84f)
+        var y = dockTop + dockHeight + 6
         for ((p, window) in rows) {
             if (y + 40 > h - pad + 4) break
             y += row(canvas, "${p.name} · ${window.label}", window, pad, y, w - pad * 2, d, ink, input)

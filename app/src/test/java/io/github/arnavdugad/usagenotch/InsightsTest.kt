@@ -20,7 +20,13 @@ class InsightsTest {
         assertTrue(session.days.dropLast(1).all { it.used == null })
         assertEquals(.01, session.days.last().used!!, 1e-9)
         assertEquals(1, session.streak)
-        assertEquals(listOf(Triple(2, 7, .01)), session.busiest())
+        // The fixture's only reading hour depends on when it was generated; busiest() must return exactly that cell.
+        val cell = session.heat.indexOfFirst { it > 0 }
+        assertEquals(listOf(Triple(cell / 24, cell % 24, .01)), session.busiest())
+        // Windows 2.5 adds a 90-day calendar next to the 30 days Android 1.3 reads.
+        assertEquals(90, session.calendar.size)
+        assertEquals(session.days.last(), session.calendar.last())
+        assertEquals(session.days, session.calendar.takeLast(30))
         assertNotNull(claude.sessionWindow()!!.forecast)
         assertEquals("Limited history", claude.sessionWindow()!!.forecast!!.confidence)
         // Older PCs send neither.

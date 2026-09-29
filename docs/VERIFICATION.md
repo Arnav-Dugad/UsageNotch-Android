@@ -1,5 +1,29 @@
 # Verification
 
+## 1.4.0 (September 29, 2026)
+
+Checked on the Samsung Galaxy S23+ (Android 16) with UsageNotch for Windows 2.4.0 and a staged 2.5.0, and on Android 16 and Android 9 emulators.
+
+- **Glass on real GPUs:** on the S23+ and the Android 16 emulator, cards blur and refract the ambient light, and content scrolling under the tab bar refracts through it. The tab bar's drop moves between tabs, the status capsule springs open into a mini dock once the dock scrolls away, and scrolled content fades out under the status bar. This check found text colliding with the clock and weak contrast for secondary text; both were fixed (a solid fade behind the status bar and a smoked dark tint). Light mode was checked on the emulator. On Android 9 the same layout draws with the denser fallback tint and no blur, with an empty crash log.
+- **Real data on the S23+:** 1.4.0 installed over 1.3.0 and kept the pairing. With Windows 2.5.0 staged, the History tab showed a 90-day calendar from this PC's real history. Days before this PC began recording were outlined as no data.
+- **Widgets on the S23+ home screen:** both existing widgets (2×1 and 5×4) redrew with the glass body over the wallpaper. A screen recording of the 2×1 widget's refresh button showed the spinner for about a second, then the refresh icon again. The broadcast lasted 0.94 s, including the 0.7 s minimum, and refreshed from the PC over Wi-Fi.
+- **Sample-data interactions on the emulator:** tapping the Claude ring morphed it into the full-screen view, with Pace, Best time to start, Budget and the chart. Tapping a daily bar morphed it into the day card, and the bar hid behind it.
+- **Tests:** 61 unit and Robolectric tests pass. New ones cover:
+  - window periods and the time-left arc, including resets that don't fit the period;
+  - budget states, including "by 6 PM" projections and budgets after their time;
+  - budget alerts, which fire once for pace and once for over;
+  - the best time to start (renewing mid busy block, waiting for an active session, starting now), and busy blocks that ignore unobserved hours;
+  - the weekly recap's schedule and text, and day ranks;
+  - the 90-day calendar from Windows 2.5's fixtures;
+  - the History calendar and side-by-side chart, a bar opening its day, budgets from the full-screen view reaching the card while sample data is never saved, tab selection, and the widget's refresh corner and spinner state.
+- **Optimized build:** the R8 smoke build passes `packaging/launch-check.sh` on the Android 16 and Android 9 emulators.
+- **Lint:** no errors.
+
+Not verified here:
+- The renewal particle burst on a device. It needs a reset while the ring is on screen; the animation is covered by code review.
+- Budget alerts and the weekly recap arriving as real notifications (the logic is covered by tests).
+- Dragging across the tab bar on a device (tapping was checked).
+
 ## 1.3.0 (September 29, 2026)
 
 Checked on a Samsung Galaxy S23+ (Android 16, One UI) over USB, paired with UsageNotch for Windows, and on Android 16 and Android 9 emulators.

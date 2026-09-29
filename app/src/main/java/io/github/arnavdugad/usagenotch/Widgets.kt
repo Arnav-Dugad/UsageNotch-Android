@@ -80,10 +80,28 @@ open class UsageWidget : AppWidgetProvider() {
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) { renderWidget(context, manager, id, this is FocusWidget) }
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == REFRESH_ACTION) { requestRefresh(context); updateWidgets(context) }
+        if (intent.action != REFRESH_ACTION) return
+        // Refresh right away while the widget shows a spinner; the background job takes over if the PC is slow.
+        val repo = Repository(context)
+        repo.prefs.edit().putLong(REFRESHING, System.currentTimeMillis() + 12_000).apply()
+        updateWidgets(context)
+        val pending = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            val started = System.currentTimeMillis()
+            try {
+                val done = kotlinx.coroutines.withTimeoutOrNull(9_000) { runCatching { repo.refresh() }; true }
+                if (done == null) requestRefresh(context)
+                // A fast Wi-Fi refresh would flash the spinner too briefly to notice.
+                kotlinx.coroutines.delay((700 - (System.currentTimeMillis() - started)).coerceAtLeast(0))
+            } finally {
+                repo.prefs.edit().remove(REFRESHING).apply()
+                afterNewData(context)
+                pending.finish()
+            }
+        }
     }
     override fun onDeleted(context: Context, ids: IntArray) { val edit = Repository(context).prefs.edit(); ids.forEach { edit.remove("widget-$it") }; edit.apply() }
-    companion object { const val REFRESH_ACTION = "io.github.arnavdugad.usagenotch.REFRESH" }
+    companion object { const val REFRESH_ACTION = "io.github.arnavdugad.usagenotch.REFRESH"; internal const val REFRESHING = "widgetRefreshingUntil" }
 }
 class FocusWidget : UsageWidget()
 fun updateWidgets(context: Context) {
@@ -123,10 +141,11 @@ internal fun widgetSizes(context: Context, options: Bundle): List<SizeF> {
 internal fun widgetInput(context: Context, id: Int, focus: Boolean): WidgetRenderer.Input {
     val repo = Repository(context); val snapshot = repo.snapshot(); val now = System.currentTimeMillis()
     return WidgetRenderer.Input(snapshot, repo.pairing() != null, widgetStatus(repo, snapshot, now), repo.remaining(), repo.use24(), now,
-        darkFor(context, repo.appearance()), focus, repo.prefs.getString("widget-$id", null), repo.offline())
+        darkFor(context, repo.appearance()), focus, repo.prefs.getString("widget-$id", null), repo.offline(), Budgets.all(repo.prefs))
 }
 internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options: Bundle = Bundle()): RemoteViews {
     val input = widgetInput(context, id, focus)
+    val refreshing = Repository(context).prefs.getLong(UsageWidget.REFRESHING, 0L) > System.currentTimeMillis()
     val density = context.resources.displayMetrics.density
     val open = PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val refresh = PendingIntent.getBroadcast(context, id, Intent(context, if (focus) FocusWidget::class.java else UsageWidget::class.java).setAction(UsageWidget.REFRESH_ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -140,7 +159,8 @@ internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options
             setInt(R.id.widget_root, "setBackgroundResource", if (input.dark) R.drawable.widget_background else R.drawable.widget_background_light)
             setImageViewBitmap(R.id.widget_image, out.bitmap)
             setContentDescription(R.id.widget_image, out.description)
-            setViewVisibility(R.id.widget_refresh, if (out.full) View.VISIBLE else View.GONE)
+            setViewVisibility(R.id.widget_refresh, if (out.refresh && !refreshing) View.VISIBLE else View.GONE)
+            setViewVisibility(R.id.widget_progress, if (out.refresh && refreshing) View.VISIBLE else View.GONE)
             setOnClickPendingIntent(R.id.widget_root, open); setOnClickPendingIntent(R.id.widget_image, open); setOnClickPendingIntent(R.id.widget_refresh, refresh)
         }
     }

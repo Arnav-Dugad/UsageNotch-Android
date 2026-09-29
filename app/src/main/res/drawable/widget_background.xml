@@ -1,1 +1,2 @@
-<shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#F2121519" /><corners android:radius="24dp" /><stroke android:width="1dp" android:color="#24FFFFFF" /></shape>
+<!-- Translucent glass body; the widget bitmap adds the specular rim and sheen. Keep in sync with WidgetRenderer.GLASS_DARK. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"><gradient android:angle="315" android:startColor="#E01B202A" android:endColor="#CC0E1117" /><corners android:radius="24dp" /></shape>

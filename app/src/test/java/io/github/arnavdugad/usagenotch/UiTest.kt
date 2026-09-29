@@ -29,28 +29,32 @@ class UiTest {
     @Test fun onboardingPreviewNavigationAndSettings() {
         compose.setContent { NotchTheme("dark") { NotchApp() } }
         compose.onNodeWithText("Scan QR code").assertIsDisplayed()
-        compose.onNodeWithText("Import PC pairing").assertExists()
+        compose.onAllNodesWithText("Import file").onFirst().assertExists()
         screenshot("01-onboarding")
         compose.onNodeWithText("Explore with sample data").performClick()
-        compose.onNodeWithText("Preview · sample data").assertIsDisplayed()
+        compose.onNodeWithText("Sample data").assertIsDisplayed()
         compose.onAllNodesWithText("Claude").onFirst().assertExists()
         compose.onAllNodesWithText("Current session").onFirst().assertExists()
         screenshot("02-overview")
-        compose.onNodeWithText("History").performClick()
-        compose.onNodeWithText("Your patterns, in time.").assertIsDisplayed()
+        // No taglines: the screen starts with content.
+        compose.onNodeWithText("Your AI, at a glance.").assertDoesNotExist()
+        compose.onNodeWithContentDescription("History").performClick()
         compose.onNodeWithText("Daily usage").assertExists()
         compose.onNodeWithText("Streak").assertExists()
         screenshot("03-history")
         compose.onNodeWithText("30d").performClick()
-        scrollTo("Busiest: ", substring = true)
-        compose.onNodeWithText("Busiest hours").assertExists()
-        compose.onNodeWithText("Widgets").performClick()
-        compose.onNodeWithText("Any size. Your rings.").assertIsDisplayed()
+        scrollToNode(hasText("Calendar")); compose.onNodeWithText("Calendar").assertExists()
+        scrollToNode(hasText("Side by side")); compose.onNodeWithText("Side by side").assertExists()
+        screenshot("03b-history-calendar")
+        scrollToNode(hasText("Busiest hours")); compose.onNodeWithText("Busiest hours").assertExists()
+        compose.onNodeWithContentDescription("Widgets").performClick()
+        compose.onNodeWithText("Quick Settings tile").assertExists()
         screenshot("03-widgets")
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithText("Pair your Windows PC").assertExists()
         screenshot("04-settings")
-        scrollTo("Show remaining"); compose.onNodeWithContentDescription("Show remaining").performClick()
+        // Scroll past it so the floating tab bar doesn't cover the row.
+        scrollTo("Check for updates"); compose.onNodeWithContentDescription("Show remaining").performClick()
         compose.onNodeWithContentDescription("Show remaining").assertIsOff()
     }
     @Test fun dockCellsShowPercentagesAndWeeklyFigures() {
@@ -59,7 +63,7 @@ class UiTest {
         // Sample: Claude session 27% used, weekly 41% used.
         compose.onNodeWithContentDescription("Claude, 73% left, 7d 59%. Open details").assertExists()
         compose.onAllNodesWithText("73% left").onFirst().assertExists()
-        compose.onNodeWithText("Usage inspector", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("At this pace: 61.4% used at reset").assertExists()
     }
     @Test fun dockRingOpensTheProviderViewAndBackReturns() {
         compose.setContent { NotchTheme("dark") { NotchApp() } }
@@ -70,25 +74,60 @@ class UiTest {
         compose.onNodeWithText("Last 24 hours").assertExists()
         screenshot("07-provider-detail")
         compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("Preview · sample data").assertIsDisplayed()
+        compose.onNodeWithText("Sample data").assertIsDisplayed()
         compose.onNodeWithText("Pace").assertDoesNotExist()
     }
     @Test fun notificationAndThemeSettingsArePresent() {
         compose.setContent { NotchTheme("dark") { NotchApp() } }
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         scrollTo("Wallpaper colors"); compose.onNodeWithContentDescription("Wallpaper colors").assertIsOff()
         scrollTo("Usage alerts"); compose.onNodeWithContentDescription("Usage alerts").assertIsOff()
         scrollTo("Live countdown"); compose.onNodeWithContentDescription("Live countdown").assertIsOff()
+        scrollTo("Weekly recap"); compose.onNodeWithContentDescription("Weekly recap").assertIsOff()
+        screenshot("04b-settings-notifications")
     }
     @Test fun wallpaperColorsKeepTheCurrentPage() {
         var wallpaper by androidx.compose.runtime.mutableStateOf(false)
         compose.setContent { NotchTheme("dark", wallpaper) { NotchApp(wallpaper = wallpaper, wallpaperChanged = { wallpaper = it }) } }
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithContentDescription("Settings").performClick()
         scrollTo("Wallpaper colors"); compose.onNodeWithContentDescription("Wallpaper colors").performClick()
         compose.waitForIdle()
         assertTrue(wallpaper)
         compose.onNodeWithContentDescription("Wallpaper colors").assertIsOn()
-        compose.onNodeWithText("Perfectly yours.").assertExists()
+        compose.onNodeWithContentDescription("Dark theme").assertExists()
+    }
+    @Test fun budgetFromTheProviderViewShowsOnTheCard() {
+        compose.setContent { NotchTheme("dark") { NotchApp() } }
+        compose.onNodeWithText("Explore with sample data").performClick()
+        compose.onNodeWithContentDescription("Claude, 73% left, 7d 59%. Open details").performClick()
+        compose.onNodeWithContentDescription("Budget").performScrollTo().performClick()
+        compose.onNodeWithText("Stay under").assertExists()
+        compose.onAllNodesWithText("60%").onFirst().assertExists()
+        // 27% used, +15.6 points an hour, projected 61.4% at the reset: just over a 60% budget.
+        compose.onAllNodesWithText("On pace for 61% by the reset").onFirst().assertExists()
+        screenshot("07b-budget")
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onAllNodesWithText("On pace for 61% by the reset").onFirst().assertExists()
+        // Sample data never changes your real settings.
+        assertTrue(Budgets.all(ApplicationProvider.getApplicationContext<Application>().getSharedPreferences("display", 0)).isEmpty())
+    }
+    @Test fun historyBarOpensThatDay() {
+        compose.setContent { NotchTheme("dark") { NotchApp() } }
+        compose.onNodeWithText("Explore with sample data").performClick()
+        compose.onNodeWithContentDescription("History").performClick()
+        val today = java.time.LocalDate.now().toString()
+        compose.onNode(SemanticsMatcher("click label Open $today") { it.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsActions.OnClick) { null }?.label == "Open $today" }).performClick()
+        compose.onNodeWithText("of the limit used that day").assertExists()
+        compose.onNodeWithText("Your average").assertExists()
+        screenshot("03c-history-day")
+        compose.onNodeWithContentDescription("Close").performClick()
+        compose.onNodeWithText("of the limit used that day").assertDoesNotExist()
+    }
+    @Test fun tabBarSelectsTabs() {
+        compose.setContent { NotchTheme("dark") { NotchApp() } }
+        compose.onNodeWithContentDescription("Settings").performClick().assertIsSelected()
+        compose.onNodeWithContentDescription("Overview").assertIsNotSelected()
+        compose.onNodeWithContentDescription("Overview").performClick().assertIsSelected()
     }
     @Test fun lightThemeRenders() {
         compose.setContent { NotchTheme("light") { NotchApp() } }
@@ -161,6 +200,24 @@ class UiTest {
         assertTrue(focus.findViewById<android.widget.ImageView>(R.id.widget_image).contentDescription.contains("Codex"))
     }
 
+    @Test fun widgetShowsASpinnerWhileRefreshing() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val now = System.currentTimeMillis()
+        context.getSharedPreferences("usage", 0).edit().putString("snapshot", fixture(now, now + 7_200_000)).putLong("sync", now).commit()
+        context.getSharedPreferences("pairing-vault", 0).edit().commit()
+        val options = android.os.Bundle().apply { putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 330); putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 250); putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 250); putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 330) }
+        val input = widgetInput(context, 7, false)
+        val out = WidgetRenderer.render(context, WidgetRenderer.Frame(330f, 250f, 2f), input.copy(paired = true))
+        assertTrue("a full widget keeps the refresh corner", out.refresh)
+        // Small 1×1 widgets open the app instead.
+        assertFalse(WidgetRenderer.render(context, WidgetRenderer.Frame(70f, 70f, 2f), input.copy(paired = true)).refresh)
+        context.getSharedPreferences("display", 0).edit().putLong(UsageWidget.REFRESHING, now + 10_000).commit()
+        val views = buildWidgetViews(context, 7, false, options).apply(context, android.widget.FrameLayout(context))
+        assertEquals(android.view.View.GONE, views.findViewById<android.view.View>(R.id.widget_refresh).visibility)
+        context.getSharedPreferences("display", 0).edit().remove(UsageWidget.REFRESHING).commit()
+        val idle = buildWidgetViews(context, 7, false, options).apply(context, android.widget.FrameLayout(context))
+        assertEquals(android.view.View.GONE, idle.findViewById<android.view.View>(R.id.widget_progress).visibility)
+    }
     /** Writes the widget picker previews from sample data with the real renderer (copied into res/drawable-nodpi). */
     @Test fun widgetPickerPreviews() {
         val context = ApplicationProvider.getApplicationContext<Application>()
@@ -172,9 +229,17 @@ class UiTest {
             canvas.drawRoundRect(0f, 0f, framed.width.toFloat(), framed.height.toFloat(), 48f, 48f, paint); canvas.drawBitmap(out.bitmap, 0f, 0f, null)
             val file = File("build/previews/$name.png"); file.parentFile!!.mkdirs(); file.outputStream().use { framed.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
+        // Transparent renders for the README, composited over a wallpaper there.
+        for ((name, focus, size) in listOf(Triple("full", false, 330f to 250f), Triple("focus", true, 170f to 170f), Triple("row", false, 330f to 96f), Triple("one", true, 80f to 80f), Triple("column", false, 90f to 260f), Triple("focus-wide", true, 330f to 250f))) {
+            for (dark in listOf(true, false)) {
+                val out = WidgetRenderer.render(context, WidgetRenderer.Frame(size.first, size.second, 3f), WidgetRenderer.Input(sample, true, "PC sync just now", true, false, sample.generatedAt, dark, focus, "claude", false))
+                val file = File("build/previews/raw-$name-${if (dark) "dark" else "light"}.png"); file.outputStream().use { out.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+        }
     }
     /** Settings is a lazy list: items off screen are not composed until the list scrolls to them. */
-    private fun scrollTo(description: String, substring: Boolean = false) = compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasContentDescription(description, substring = substring))
+    private fun scrollTo(description: String, substring: Boolean = false) = scrollToNode(hasContentDescription(description, substring = substring))
+    private fun scrollToNode(matcher: SemanticsMatcher) = compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(matcher)
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val file = File("build/screenshots/$name.png"); file.parentFile!!.mkdirs()

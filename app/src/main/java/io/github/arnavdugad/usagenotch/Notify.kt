@@ -20,6 +20,7 @@ fun afterNewData(context: Context) {
     runCatching { LiveUpdate.update(context) }
     runCatching { UsageAlerts.evaluate(context) }
     runCatching { UsageTileService.refresh(context) }
+    runCatching { WeeklyRecap.schedule(context) }
 }
 
 private fun openApp(context: Context, request: Int) = PendingIntent.getActivity(context, request,
@@ -85,9 +86,20 @@ object UsageAlerts {
     fun setEnabled(context: Context, on: Boolean) { Repository(context).prefs.edit().putBoolean("usageAlerts", on).apply() }
     data class Alert(val key: String, val title: String, val body: String)
     /** Pure decision logic, tested without Android: which alerts are due that haven't been sent. */
-    fun due(snapshot: Snapshot?, sent: Set<String>, now: Long, use24: Boolean): List<Alert> {
+    fun due(snapshot: Snapshot?, sent: Set<String>, now: Long, use24: Boolean, budgets: List<Budget> = emptyList(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Alert> {
         val out = mutableListOf<Alert>()
+        val today = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
         for (p in snapshot?.providers.orEmpty()) for (w in p.windows) {
+            // Budgets: once per period and day when the pace would pass it, and once when it is passed.
+            budgets.firstOrNull { it.provider == p.id && it.window == w.id }?.takeIf { !w.resetPassed(now) }?.let { b ->
+                val status = Budgets.status(b, w, now, use24, zone)
+                val base = "${p.id}|${w.id}|${w.reset ?: 0}|budget-${b.limit}-${b.byMinute ?: "reset"}"
+                when (status.state) {
+                    Budgets.State.Over -> "$base|over".takeIf { it !in sent }?.let { out += Alert(it, "${p.name}: over your ${b.limit}% budget", "${w.label} is ${(w.used * 100).toInt()}% used.") }
+                    Budgets.State.Pace -> "$base|pace|$today".takeIf { it !in sent && "$base|over" !in sent }?.let { out += Alert(it, "${p.name}: ${status.text.replaceFirstChar { c -> c.lowercase() }}", "Your budget for ${w.label} is ${b.label(use24)}.") }
+                    else -> Unit
+                }
+            }
             if (w.resetPassed(now)) continue
             val period = "${p.id}|${w.id}|${w.reset ?: 0}"
             val used = (w.used * 100).toInt()
@@ -108,7 +120,7 @@ object UsageAlerts {
     fun evaluate(context: Context) {
         val repo = Repository(context); val prefs = repo.prefs; val now = System.currentTimeMillis()
         val sent = prefs.getStringSet("alertsSent", emptySet()).orEmpty()
-        val alerts = due(repo.snapshot(), sent, now, repo.use24())
+        val alerts = due(repo.snapshot(), sent, now, repo.use24(), Budgets.all(prefs))
         if (alerts.isEmpty()) return
         // Passing a higher level marks the lower ones sent too.
         val keys = alerts.flatMap { a -> if (a.key.endsWith("|95")) listOf(a.key, a.key.removeSuffix("|95") + "|80") else listOf(a.key) }
@@ -156,5 +168,41 @@ class UsageTileService : TileService() {
     }
     companion object {
         fun refresh(context: Context) { runCatching { requestListeningState(context, ComponentName(context, UsageTileService::class.java)) } }
+    }
+}
+
+/** A Sunday-evening summary of the week, built from the history already on this phone, so it works with the PC off. */
+object WeeklyRecap {
+    private const val CHANNEL = "recap"
+    internal const val ACTION = "io.github.arnavdugad.usagenotch.WEEKLY_RECAP"
+    fun enabled(context: Context) = Repository(context).prefs.getBoolean("weeklyRecap", false)
+    fun setEnabled(context: Context, on: Boolean) { Repository(context).prefs.edit().putBoolean("weeklyRecap", on).apply(); schedule(context) }
+    /** The next Sunday at 7 PM local time, strictly after [now]. */
+    fun nextAt(now: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Long {
+        val local = java.time.Instant.ofEpochMilli(now).atZone(zone)
+        var at = local.toLocalDate().with(java.time.temporal.TemporalAdjusters.nextOrSame(java.time.DayOfWeek.SUNDAY)).atTime(19, 0).atZone(zone)
+        if (!at.isAfter(local)) at = at.plusWeeks(1)
+        return at.toInstant().toEpochMilli()
+    }
+    private fun intent(context: Context) = PendingIntent.getBroadcast(context, 9, Intent(context, RecapReceiver::class.java).setAction(ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    fun schedule(context: Context) {
+        val alarms = context.getSystemService(android.app.AlarmManager::class.java) ?: return
+        if (!enabled(context)) { alarms.cancel(intent(context)); return }
+        alarms.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, nextAt(System.currentTimeMillis()), intent(context))
+    }
+    internal fun deliver(context: Context) {
+        if (!enabled(context) || !ResetAlerts.canNotify(context)) return
+        val text = Recap.compose(Repository(context).snapshot(), java.time.LocalDate.now()) ?: return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Weekly recap", NotificationManager.IMPORTANCE_LOW).apply { description = "A summary of your week, on Sunday evenings." })
+        manager.notify(44, Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_stat_notch).setContentTitle(text.title).setContentText(text.body)
+            .setStyle(Notification.BigTextStyle().bigText(text.body)).setContentIntent(openApp(context, 45)).setAutoCancel(true).build())
+    }
+}
+class RecapReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != WeeklyRecap.ACTION) return
+        runCatching { WeeklyRecap.deliver(context) }
+        runCatching { WeeklyRecap.schedule(context) }
     }
 }

@@ -8,7 +8,7 @@ Source: https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/ic
 Libraries included in the app, under the Apache License 2.0
 (https://www.apache.org/licenses/LICENSE-2.0):
 - ZXing core 3.5.3, QR code decoding. https://github.com/zxing/zxing
-- Haze 1.6.10, background blur. Copyright Chris Banes. https://github.com/chrisbanes/haze
+- Backdrop 1.0.6 and Shapes 1.2.0, liquid glass effects and continuous-corner shapes. Copyright Kyant. https://github.com/Kyant0/AndroidLiquidGlass
 - AndroidX and Jetpack Compose, including CameraX. Copyright The Android Open Source Project.
 
 Brand marks remain the property of their respective owners. UsageNotch is independent and is not endorsed by these providers.

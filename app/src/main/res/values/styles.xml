@@ -5,6 +5,8 @@
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <string name="app_name">UsageNotch</string>
+    <string name="widget_refresh">Refresh usage from PC</string>
+    <string name="widget_refreshing">Refreshing</string>
     <string name="widget_description">Claude, Codex and your other AI usage windows, kept distinct. Tap refresh for the latest reading.</string>
     <string name="focus_widget_description">One AI provider in focus, with its first two usage windows.</string>
 </resources>

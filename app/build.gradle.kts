@@ -7,8 +7,8 @@ android {
         applicationId = "io.github.arnavdugad.usagenotch"
         minSdk = 28
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.3.0"
+        versionCode = 6
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -52,8 +52,10 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     implementation("com.google.zxing:core:3.5.3")
-    // Frosted-glass blur for the floating dock strip (falls back to a translucent scrim before Android 12).
-    implementation("dev.chrisbanes.haze:haze:1.6.10")
+    // Liquid glass: backdrop refraction (Android 13+), blur and vibrancy (Android 12+), specular highlights and
+    // continuous-corner shapes. 1.0.6 matches Compose 1.10; 2.x needs Compose 1.11+.
+    implementation("io.github.kyant0:backdrop:1.0.6")
+    implementation("io.github.kyant0:shapes:1.2.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250107")

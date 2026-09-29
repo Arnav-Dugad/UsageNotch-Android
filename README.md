@@ -1,23 +1,23 @@
 # UsageNotch for Android
 
-Your Claude, Codex, Gemini and Cursor usage limits on your phone, with the desktop dock's rings, widgets in any size, a live countdown, usage alerts and 30-day history. It's a companion to [UsageNotch for Windows](https://github.com/Arnav-Dugad/UsageNotch-Windows).
+Your Claude, Codex, Gemini and Cursor usage limits on your phone, in liquid glass: the desktop dock's rings, widgets in any size, a live countdown, budgets, alerts and history. It's a companion to [UsageNotch for Windows](https://github.com/Arnav-Dugad/UsageNotch-Windows).
 
 ## Download
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.3.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
-| **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.4.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
 
-The APK is sideloaded, not from the Play Store. When you open it, Android asks you to allow installs from your browser or file manager. Updates install over it, and the app tells you when one is available. If an earlier version closed immediately on your phone, install 1.3.0: the 1.0.x startup crash was fixed in 1.1.
+The APK is sideloaded, not from the Play Store. When you open it, Android asks you to allow installs from your browser or file manager. Updates install over it, and the app tells you when one is available. If an earlier version closed immediately on your phone, install 1.4.0: the 1.0.x startup crash was fixed in 1.1.
 
 <p>
-<img src="docs/images/phone-overview.png" width="220" alt="Overview: a dock of rings with Claude, Codex and Gemini logos, 73% and 7d 59% under Claude, then Claude's card" />
-<img src="docs/images/phone-card.png" width="220" alt="Claude card: Current session 73% left with a green bar, Resets in 02:10:33, Resets today at 8:49 AM; All models; Sonnet weekly; Usage credits $3.50 used" />
-<img src="docs/images/phone-detail.png" width="220" alt="Claude full screen: a large ring with 73% remaining, Resets in 02:10:45, a Pace card saying About 61% used by the reset, and a 24-hour chart" />
-<img src="docs/images/phone-history.png" width="220" alt="History: Claude and Codex chips, Current session and All models, 7d/30d, tiles for total, daily average, busiest day and a 12-day streak, then daily usage bars" />
+<img src="docs/images/phone-overview.png" width="220" alt="Overview in liquid glass: a floating status capsule, a glass dock of rings with Claude, Codex and Gemini logos, then Claude's glass card, over soft coloured light, with a floating glass tab bar" />
+<img src="docs/images/phone-detail.png" width="220" alt="Claude full screen: a large ring with 73% remaining and a hairline for the time left, Pace, Best time to start and Budget cards on glass" />
+<img src="docs/images/phone-history.png" width="220" alt="History: provider and limit chips, 7d/30d, tiles for total, daily average, busiest day and streak, then daily usage bars" />
+<img src="docs/images/phone-light.png" width="220" alt="The overview in the light theme, with frosted white glass" />
 <img src="docs/images/widget-full.png" width="300" alt="Full widget: three rings, then Claude Current session and Codex 5-hour limit rows with reset times" />
 </p>
 
@@ -30,7 +30,7 @@ Screens from Android 16 with sample data.
 
 That's it. With no app installed yet, scan the code with the phone's camera: the page that opens offers the download, then hands the pairing to the app in one tap. The app always asks before pairing from a link.
 
-Other ways to pair: **Paste pairing code** (Copy pairing code on the PC, send it to yourself) or **Import PC pairing** (Save pairing file on the PC). Phone and PC need the same Wi-Fi or a private VPN such as Tailscale.
+Other ways to pair: **Paste code** (Copy pairing code on the PC, send it to yourself) or **Import file** (Save pairing file on the PC). Phone and PC need the same Wi-Fi or a private VPN such as Tailscale.
 
 **Already using UsageNotch Link?** Windows 2.3 includes it. Open Settings → Phone and choose **Switch to built-in**. Your phone stays paired: same key, same certificate.
 
@@ -38,25 +38,30 @@ Other ways to pair: **Paste pairing code** (Copy pairing code on the PC, send it
 
 Add them from the **Widgets** tab or your launcher's widget list, then resize freely. Each size gets a layout that fits:
 
-<img src="docs/images/widget-sizes.png" width="640" alt="Widget sizes: a full overview, a focus widget with a large dual ring and limits, a dock row, a two-ring square, a single focus ring, a vertical dock column and 1×1 rings" />
+<img src="docs/images/widget-sizes.png" width="640" alt="Glass widgets in dark and light over a wallpaper: a full overview, a wide focus widget with a large dual ring and limits, a dock row, 2×2 focus rings, 1×1 rings and a vertical dock column" />
 
 - **1×1**: one ring with the provider's logo and percentage.
 - **A row or a column**: the desktop dock, with each provider's ring, percentage and "7d" weekly figure.
 - **Larger**: the rings plus each limit's colour-graded bar and reset time.
 - **Focus widget**: one provider with a big dual ring (outer: session, inner: weekly). Long-press it to choose the provider.
 
-Rings use the desktop's exact colour ramp (green → amber → red as a limit fills) and the real Claude, OpenAI, Gemini and Cursor marks. Widgets follow your Light/Dark choice.
+Widgets are glass too: a translucent body that lets your wallpaper through, with a specular rim. From about 2×1 up, the refresh button in the corner updates straight from your PC with a spinner; 1×1 opens the app. Rings use the desktop's exact colour ramp (green → amber → red as a limit fills), a hairline for the time left before the reset, your budget mark, and the real Claude, OpenAI, Gemini and Cursor marks. Widgets follow your Light/Dark choice.
 
 ## What you get
 
-- The desktop popup's layout for every provider: *Updated just now*, account name (when the dock shows it), a Live/Saved/Sign in status pill, each limit with its bar, amount, live *Resets in* countdown and local *Resets today at 3:29 PM*.
-- **Full-screen provider view**: tap a ring and it grows into a large ring with the pace forecast and a 24-hour chart you can scrub with your finger (with light haptic ticks). The back gesture shrinks it away.
-- **Pace** from the desktop's forecast: "At this pace: limit around 4:10 PM".
-- **History tab**: 7 or 30 days of daily usage, total, daily average, busiest day, your streak, and a weekday × hour map of your busiest times. Missing days and hours are shown as no data, never as zero. Needs Windows 2.4.
+- **Liquid glass**, after iOS: cards, the floating tab bar and controls sample what's behind them, bend it at their edges (Android 13+), blur and saturate it (Android 12+), and catch the light on a specular rim. Soft coloured light drifts behind, tinted by your providers. The tab bar's selection is a drop of glass that glides, stretches and can be dragged between tabs. Older Android versions get the same shapes with a denser tint.
+- Clean and quiet: no taglines, just your PC's status in a floating capsule that springs open into a mini dock when you scroll.
+- Every provider on a glass card: each limit with its bar, local reset time and live countdown, the pace, and your budget.
+- **Full-screen provider view**: tap a ring and it grows into a large ring, with the pace, the best time to start, a budget, a 24-hour chart you can scrub (with light haptic ticks) and the provider's colour. The back gesture shrinks it away.
+- **Best time to start**: when to start a session so it renews in the middle of your usual busy hours, from your PC's history.
+- **Budgets**: keep a limit under, say, 60% by 6 PM. A tick marks it on the ring and bar; the app says when you're near it, on pace to pass it, or over it, and usage alerts can notify you.
+- **History tab**: 7 or 30 days of daily usage with bars that grow in as you scroll (tap one and it morphs into that day's card), total, daily average, busiest day, streak, a 90-day calendar, your providers side by side, and a weekday × hour map of your busiest times. Missing days and hours are shown as no data, never as zero. Needs Windows 2.4; the calendar covers 90 days from Windows 2.5.
 - **Live countdown**: an ongoing notification with the percentage and a countdown to the reset, also on the lock screen. On Android 16 it's a Live Update with a status-bar chip.
 - **Usage alerts** at 80% and 95% used, and when the pace says a limit runs out within two hours before it resets. **Reset alerts** when a limit renews, with a gentle vibration.
 - **Quick Settings tile** with the percentage; tap it to refresh. Add it from the Widgets tab.
-- **Wallpaper colors** (Material You) on Android 12+, a themed monochrome icon, rolling numbers, a ring that glows above 90%, and a glass dock that follows you as you scroll. Reduce motion turns the animations off.
+- **Weekly recap** on Sunday evening: your week's usage, busiest day and streak, from the history on your phone.
+- **Your colours**: pick an accent for each provider; it tints its card, charts and the ambient light. Rings keep the usage colours.
+- Comet-trail rings with a hairline for the time left before each reset, particles when a limit renews while you watch, rolling numbers, a glow above 90%, wallpaper colors (Material You) on Android 12+ and a themed monochrome icon. Reduce motion turns the animations off.
 - Pull down to refresh. Update notices, Light/Dark/System theme, 12/24-hour clock.
 - Pay-as-you-go credits and API spend shown with their amounts.
 - Safe mode: if the app ever fails to start twice, it opens a plain screen to share a crash report or clear its data.
@@ -71,11 +76,12 @@ A phone can't observe *new* usage while every PC running UsageNotch is off. Your
 
 ## Privacy and security
 
-- AI credentials and account identifiers never leave Windows. The phone receives percentages, limits, reset times, 24 hours of readings, 30 days of daily and hourly totals, pace estimates, and the account display name only if the dock shows it.
+- AI credentials and account identifiers never leave Windows. The phone receives percentages, limits, reset times, 24 hours of readings, 90 days of daily totals, 30 days of hourly totals, pace estimates, and the account display name only if the dock shows it.
 - Wi-Fi pairing uses HTTPS pinned to your PC's own certificate plus a random 256-bit key. Plain HTTP, redirects and public addresses are rejected. The pairing is encrypted with Android Keystore and excluded from backups.
 - The QR code keeps its pairing in the part of the web address browsers never send to a server. The pairing page removes it from the address bar immediately.
 - The QR scanner runs inside the app (ZXing). It asks for the camera only when you open it; frames are analysed in memory and never saved or sent anywhere. Screenshots are chosen with Android's photo picker, so the app never gets access to your other photos.
 - **Revoke all paired phones** (Windows Settings → Phone) invalidates every code and file, including the internet sync key.
+- Budgets, colours and settings stay on your phone. Changes made while exploring sample data are never saved.
 - No ads, analytics or tracking. The app contacts your PC, your sync gist if you set one up, and GitHub Releases for update checks (can be turned off).
 
 ## Troubleshooting
