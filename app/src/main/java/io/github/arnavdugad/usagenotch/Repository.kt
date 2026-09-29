@@ -66,6 +66,8 @@ class Repository(val context: Context) {
     fun remaining() = prefs.getBoolean("remaining", true)
     fun use24() = prefs.getBoolean("clock24", false)
     fun reduceMotion() = prefs.getBoolean("reduceMotion", false)
+    /** "system", "light" or "dark"; widgets follow the same choice. */
+    fun appearance() = prefs.getString("appearance", "system") ?: "system"
     suspend fun pair(raw: String) = withContext(Dispatchers.IO) { lock.withLock {
         val pair = Pairing.parse(raw)
         // Verify the PC (or its encrypted internet copy) before replacing the working pairing.

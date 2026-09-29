@@ -1,9 +1,4 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@drawable/widget_background">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-        <TextView android:id="@+id/widget_title" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="UsageNotch" android:textColor="#EDF5FF" android:textSize="16sp" android:textStyle="bold" />
-        <TextView android:id="@+id/widget_refresh" android:layout_width="48dp" android:layout_height="48dp" android:text="↻" android:gravity="center" android:textColor="#ABE7DD" android:textSize="26sp" android:contentDescription="Refresh usage from PC" />
-    </LinearLayout>
-    <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Pair your PC in UsageNotch" android:textColor="#B4C2D6" android:textSize="11sp" android:maxLines="2" />
-    <LinearLayout android:id="@+id/widget_rows" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical" />
-
-</LinearLayout>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/widget_background" android:clipToOutline="true">
+    <ImageView android:id="@+id/widget_image" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:importantForAccessibility="yes" android:contentDescription="@string/app_name" />
+    <ImageView android:id="@+id/widget_refresh" android:layout_width="44dp" android:layout_height="44dp" android:layout_gravity="top|end" android:padding="12dp" android:src="@drawable/ic_refresh" android:contentDescription="Refresh usage from PC" android:visibility="gone" />
+</FrameLayout>

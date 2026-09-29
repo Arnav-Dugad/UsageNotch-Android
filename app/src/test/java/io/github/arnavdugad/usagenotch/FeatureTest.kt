@@ -85,7 +85,9 @@ class FeatureTest {
     @Test fun windowsApiProviderIdsShareLogosAndColors() {
         assertEquals("openai-api", providerKind("openai_api"))
         assertEquals("anthropic-api", providerKind("anthropic_api"))
-        assertEquals(providerColor("anthropic_api"), providerColor("claude"))
+        assertEquals(Logos.resource("anthropic_api"), Logos.resource("claude"))
+        assertEquals(Logos.resource("openai_api"), Logos.resource("codex"))
+        assertTrue(Logos.colored("claude") && Logos.colored("gemini") && !Logos.colored("codex") && !Logos.colored("cursor"))
     }
     @Test fun renewedWindowsNeverShowAStalePercentageAsCurrent() {
         val p = Provider("claude", "Claude", "Ok", listOf(window(1_000, 2_000)))

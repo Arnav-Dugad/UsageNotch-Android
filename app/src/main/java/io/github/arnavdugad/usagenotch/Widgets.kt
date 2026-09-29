@@ -12,7 +12,10 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.util.SizeF
+import android.content.res.Configuration
 import android.view.View
 import android.widget.RemoteViews
 import androidx.activity.ComponentActivity
@@ -105,42 +108,45 @@ internal fun widgetStatus(repo: Repository, snapshot: Snapshot?, now: Long) = wh
     repo.source() == Source.Internet -> "Internet sync ${ClockText.age(repo.lastSync(), now)}"
     else -> "PC sync ${ClockText.age(repo.lastSync(), now)}"
 }
-internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options: Bundle = Bundle()): RemoteViews {
+/** Widget sizes the launcher can show: exact sizes on Android 12+, otherwise portrait and landscape from the size range. */
+internal fun widgetSizes(context: Context, options: Bundle): List<SizeF> {
+    if (Build.VERSION.SDK_INT >= 31) {
+        // The typed overload is Android 13+; Android 12 and 12L only have the untyped one.
+        val sizes = (if (Build.VERSION.SDK_INT >= 33) options.getParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES, SizeF::class.java)
+            else @Suppress("DEPRECATION") options.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES))?.filter { it.width > 0 && it.height > 0 }
+        if (!sizes.isNullOrEmpty()) return sizes.distinct().take(4)
+    }
+    val minW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH); val maxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)
+    val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT); val maxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+    if (minW <= 0 || minH <= 0) return listOf(SizeF(250f, 170f))
+    val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+    return listOf(if (portrait) SizeF(minW.toFloat(), maxOf(minH, maxH).toFloat()) else SizeF(maxOf(minW, maxW).toFloat(), minH.toFloat()))
+}
+internal fun widgetInput(context: Context, id: Int, focus: Boolean): WidgetRenderer.Input {
     val repo = Repository(context); val snapshot = repo.snapshot(); val now = System.currentTimeMillis()
-    val all = snapshot?.providers.orEmpty()
-    val providers = if (focus) listOfNotNull(focusProvider(all, repo.prefs.getString("widget-$id", null))) else all.take(2)
-    val views = RemoteViews(context.packageName, R.layout.usage_widget)
-    views.setTextViewText(R.id.widget_title, if (focus) providers.firstOrNull()?.name ?: "AI usage" else "UsageNotch")
-    views.setTextViewText(R.id.widget_status, widgetStatus(repo, snapshot, now))
-    views.removeAllViews(R.id.widget_rows)
-    val tall = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 160) >= 260
-    val rows = providers.flatMap { p -> p.windows.take(if (focus || tall) 2 else 1).map { p to it } }
-    val remaining = repo.remaining(); val use24 = repo.use24()
-    for ((p, w) in rows) {
-        val row = RemoteViews(context.packageName, R.layout.widget_row)
-        val prefix = if (focus) "" else p.name + " · "
-        if (w.resetPassed(now)) {
-            row.setTextViewText(R.id.row_title, "${prefix}Renewed")
-            row.setViewVisibility(R.id.row_bar, View.GONE)
-            row.setTextViewText(R.id.row_detail, "${w.label} · reset ${ClockText.time(w.reset!!, use24)}\nNew usage appears after the next PC reading")
-        } else {
-            row.setTextViewText(R.id.row_title, "$prefix${w.percent(remaining)}% ${if (remaining) "left" else "used"}")
-            row.setProgressBar(R.id.row_bar, 100, w.percent(remaining).coerceIn(0, 100), false)
-            val state = readingState(p, w, now)
-            row.setTextViewText(R.id.row_detail, "${w.label} · ${ClockText.age(w.at, now)}\n" + (if (state != "Observed on PC") state else w.reset?.let { "Resets ${ClockText.stamp(it, use24)}" } ?: "Reset time not reported"))
-        }
-        views.addView(R.id.widget_rows, row)
-    }
-    if (rows.isEmpty()) {
-        val row = RemoteViews(context.packageName, R.layout.widget_row)
-        row.setTextViewText(R.id.row_title, "No usage reading yet")
-        row.setTextViewText(R.id.row_detail, "Open the app to check your connection.")
-        row.setViewVisibility(R.id.row_bar, View.GONE); views.addView(R.id.widget_rows, row)
-    }
+    return WidgetRenderer.Input(snapshot, repo.pairing() != null, widgetStatus(repo, snapshot, now), repo.remaining(), repo.use24(), now,
+        darkFor(context, repo.appearance()), focus, repo.prefs.getString("widget-$id", null), repo.offline())
+}
+internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options: Bundle = Bundle()): RemoteViews {
+    val input = widgetInput(context, id, focus)
+    val density = context.resources.displayMetrics.density
     val open = PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val refresh = PendingIntent.getBroadcast(context, id, Intent(context, if (focus) FocusWidget::class.java else UsageWidget::class.java).setAction(UsageWidget.REFRESH_ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-    views.setOnClickPendingIntent(R.id.widget_root, open); views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
-    return views
+    val sizes = widgetSizes(context, options)
+    // Launchers cap a widget's total bitmap memory at about 1.5 screens; share a safe part of that across sizes.
+    val metrics = context.resources.displayMetrics
+    val budget = ((metrics.widthPixels.toLong() * metrics.heightPixels * 4 * 3 / 5) / sizes.size).toInt().coerceIn(400_000, WidgetRenderer.MAX_BITMAP_BYTES)
+    fun views(size: SizeF): RemoteViews {
+        val out = WidgetRenderer.render(context, WidgetRenderer.Frame(size.width, size.height, density, budget), input)
+        return RemoteViews(context.packageName, R.layout.usage_widget).apply {
+            setInt(R.id.widget_root, "setBackgroundResource", if (input.dark) R.drawable.widget_background else R.drawable.widget_background_light)
+            setImageViewBitmap(R.id.widget_image, out.bitmap)
+            setContentDescription(R.id.widget_image, out.description)
+            setViewVisibility(R.id.widget_refresh, if (out.full) View.VISIBLE else View.GONE)
+            setOnClickPendingIntent(R.id.widget_root, open); setOnClickPendingIntent(R.id.widget_image, open); setOnClickPendingIntent(R.id.widget_refresh, refresh)
+        }
+    }
+    return if (Build.VERSION.SDK_INT >= 31 && sizes.size > 1) RemoteViews(sizes.associateWith { views(it) }) else views(sizes.first())
 }
 class WidgetConfigurationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -154,7 +160,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
             renderWidget(this, AppWidgetManager.getInstance(this), id, true)
             setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)); finish()
         }
-        setContent { NotchTheme {
+        setContent { NotchTheme(Repository(this).appearance()) {
             Surface { Column(Modifier.fillMaxSize().systemBarsPadding().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Your focus widget", style = MaterialTheme.typography.headlineMedium)
                 Text("Choose one provider. Its usage windows stay separate.")

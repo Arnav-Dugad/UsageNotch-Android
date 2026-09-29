@@ -1,0 +1,156 @@
+package io.github.arnavdugad.usagenotch
+
+import android.content.Context
+import android.content.res.Configuration
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.drawable.Drawable
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sin
+
+/** Usage colours, identical to the desktop Palette so rings, bars and text agree on every device. */
+object Palette {
+    private val ramp = listOf(0.00 to 0xFF2EE0A8.toInt(), 0.42 to 0xFF66E062.toInt(), 0.60 to 0xFFF2D03C.toInt(), 0.78 to 0xFFFF9E2C.toInt(), 0.92 to 0xFFFF644E.toInt(), 1.00 to 0xFFFF3B30.toInt())
+    const val WARNING = 0xFFFFB547.toInt()
+    const val DANGER = 0xFFFF5F57.toInt()
+    const val LOADING = 0xFF8FB6FF.toInt()
+    const val UNKNOWN = 0xFF6E6E7A.toInt()
+    fun usage(used: Double): Int {
+        val f = used.coerceIn(0.0, 1.0)
+        for (i in 1 until ramp.size) {
+            if (f > ramp[i].first) continue
+            val span = ramp[i].first - ramp[i - 1].first
+            return lerp(ramp[i - 1].second, ramp[i].second, if (span <= 0) 0.0 else (f - ramp[i - 1].first) / span)
+        }
+        return ramp.last().second
+    }
+    fun lerp(a: Int, b: Int, t: Double): Int {
+        val k = t.coerceIn(0.0, 1.0)
+        fun ch(shift: Int) = (((a shr shift) and 0xFF) + (((b shr shift) and 0xFF) - ((a shr shift) and 0xFF)) * k).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+    }
+    private fun luminance(c: Int): Double {
+        fun lin(v: Int) = (v / 255.0).let { if (it <= 0.04045) it / 12.92 else ((it + 0.055) / 1.055).pow(2.4) }
+        return 0.2126 * lin((c shr 16) and 0xFF) + 0.7152 * lin((c shr 8) and 0xFF) + 0.0722 * lin(c and 0xFF)
+    }
+    fun contrast(a: Int, b: Int) = (max(luminance(a), luminance(b)) + .05) / (min(luminance(a), luminance(b)) + .05)
+    /** The same colour, darkened or lightened just enough to read on the surface (WCAG 4.5:1), as on the desktop. */
+    fun readable(ink: Int, surface: Int, minimum: Double = 4.5): Int {
+        if (contrast(ink, surface) >= minimum) return ink
+        val target = if (contrast(0xFF000000.toInt(), surface) >= contrast(0xFFFFFFFF.toInt(), surface)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+        var low = 0.0; var high = 1.0
+        repeat(16) { val mid = (low + high) / 2; if (contrast(lerp(ink, target, mid), surface) < minimum) low = mid else high = mid }
+        return lerp(ink, target, high)
+    }
+    fun forStatus(status: String, used: Double?): Int = when (status) {
+        "Error" -> DANGER
+        "NeedsAuth", "Unsupported" -> WARNING
+        "Loading" -> LOADING
+        else -> used?.let { usage(it) } ?: UNKNOWN
+    }
+}
+
+@Immutable
+data class Tokens(
+    val dark: Boolean, val background: Color, val backgroundEnd: Color, val card: Color, val raised: Color, val hairline: Color,
+    val text: Color, val muted: Color, val faint: Color, val accent: Color, val onAccent: Color, val track: Color, val ink: Color,
+)
+val DarkTokens = Tokens(true, Color(0xFF0A0C11), Color(0xFF10131B), Color(0xFF151922), Color(0xFF1E232D), Color(0x1FFFFFFF),
+    Color(0xFFF2F4F8), Color(0xFFA9B1BF), Color(0xFF7D8595), Color(0xFFACE8DA), Color(0xFF07231F), Color(0x26FFFFFF), Color(0xFFF4F6FA))
+val LightTokens = Tokens(false, Color(0xFFF2F4F8), Color(0xFFE9EDF4), Color(0xFFFFFFFF), Color(0xFFF1F3F6), Color(0x1A0B0D12),
+    Color(0xFF12151B), Color(0xFF5B6371), Color(0xFF858D9B), Color(0xFF1C7C6C), Color(0xFFFFFFFF), Color(0x1F0B0D12), Color(0xFF12151B))
+val LocalTokens = staticCompositionLocalOf { DarkTokens }
+
+/** Appearance preference: "system" follows Android, or a fixed "light"/"dark". */
+fun darkFor(context: Context, appearance: String): Boolean = when (appearance) {
+    "light" -> false
+    "dark" -> true
+    else -> (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+}
+
+@Composable fun NotchTheme(appearance: String = "system", content: @Composable () -> Unit) {
+    val dark = when (appearance) { "light" -> false; "dark" -> true; else -> isSystemInDarkTheme() }
+    val t = if (dark) DarkTokens else LightTokens
+    val scheme = if (dark) darkColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
+        else lightColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
+    CompositionLocalProvider(LocalTokens provides t) { MaterialTheme(colorScheme = scheme, content = content) }
+}
+
+/** Brand marks: Claude and Gemini keep their own colours; OpenAI and Cursor use the theme's ink, as on the desktop. */
+object Logos {
+    fun resource(id: String) = when (providerKind(id)) {
+        "claude", "anthropic-api" -> R.drawable.logo_claude
+        "codex", "openai-api" -> R.drawable.logo_codex
+        "gemini" -> R.drawable.logo_gemini
+        "cursor" -> R.drawable.logo_cursor
+        else -> R.drawable.ic_notch
+    }
+    fun colored(id: String) = providerKind(id) in setOf("claude", "anthropic-api", "gemini") || resource(id) == R.drawable.ic_notch
+    fun drawable(context: Context, id: String, ink: Int): Drawable? = context.getDrawable(resource(id))?.mutate()?.also { if (!colored(id)) it.setTint(ink) }
+}
+
+/**
+ * The desktop dock ring: a quiet track, a usage arc from 12 o'clock coloured by how much is used, an optional
+ * inner ring for the weekly window, and the provider's logo in the centre. Drawn on a platform Canvas so the
+ * app and the home-screen widgets share exactly the same rendering.
+ */
+object RingPainter {
+    class Spec(
+        val shown: Float?, val used: Double?, val secondaryShown: Float?, val secondaryUsed: Double?,
+        val status: String, val renewed: Boolean, val track: Int, val logo: Drawable?, val logoScale: Float = 0.43f,
+    )
+    fun draw(canvas: Canvas, cx: Float, cy: Float, size: Float, density: Float, spec: Spec) {
+        if (size < 8f) return
+        // Per call: widgets render on background threads while the app draws on the main thread.
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        val stroke = (size * 0.052f).coerceIn(1.8f * density, 4.2f * density)
+        val radius = size / 2 - stroke / 2 - size * 0.045f
+        ring(canvas, paint, cx, cy, radius, stroke, spec.track, if (spec.renewed) null else spec.shown, spec.used)
+        if (spec.secondaryShown != null || spec.secondaryUsed != null) {
+            val innerStroke = max(1.3f * density, stroke * .62f)
+            val innerRadius = radius - stroke - size * 0.05f
+            ring(canvas, paint, cx, cy, innerRadius, innerStroke, spec.track, spec.secondaryShown, spec.secondaryUsed)
+        }
+        if (spec.shown == null && spec.status in setOf("Error", "NeedsAuth", "Unsupported")) {
+            // One restrained status mark, never an invented usage sweep.
+            val a = Math.toRadians(-45.0)
+            paint.style = Paint.Style.FILL; paint.color = if (spec.status == "Error") Palette.DANGER else Palette.WARNING
+            canvas.drawCircle(cx + radius * cos(a).toFloat(), cy + radius * sin(a).toFloat(), 2.1f * density, paint)
+            paint.style = Paint.Style.STROKE
+        }
+        spec.logo?.let { logo ->
+            val half = (size * spec.logoScale / 2).toInt()
+            logo.setBounds((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt())
+            logo.draw(canvas)
+        }
+    }
+    private fun ring(canvas: Canvas, paint: Paint, cx: Float, cy: Float, radius: Float, stroke: Float, track: Int, shown: Float?, used: Double?) {
+        paint.strokeWidth = stroke; paint.color = track
+        canvas.drawCircle(cx, cy, radius, paint)
+        val fraction = shown ?: return
+        if (!fraction.isFinite() || fraction <= 0f) return
+        paint.color = Palette.usage(used ?: 0.0)
+        if (fraction >= 0.9999f) { canvas.drawCircle(cx, cy, radius, paint); return }
+        canvas.drawArc(RectF(cx - radius, cy - radius, cx + radius, cy + radius), -90f, fraction.coerceIn(0f, 1f) * 360f, false, paint)
+    }
+    /** Ring inputs for a provider, following the dock: outer ring the session window, inner ring the weekly one. */
+    fun specFor(p: Provider, remaining: Boolean, now: Long, track: Int, logo: Drawable?, primary: Float? = null, secondary: Float? = null): Spec {
+        val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
+        return Spec(primary ?: s?.shown(remaining)?.toFloat(), s?.used, w?.let { secondary ?: it.shown(remaining).toFloat() }, w?.used,
+            p.status, s?.resetPassed(now) == true, track, logo)
+    }
+}

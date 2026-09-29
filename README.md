@@ -1,75 +1,86 @@
 # UsageNotch for Android
 
-Your Claude, Codex, Gemini and Cursor usage limits on your phone, with home-screen widgets and reset alerts. It's a companion to [UsageNotch for Windows](https://github.com/Arnav-Dugad/UsageNotch-Windows).
+Your Claude, Codex, Gemini and Cursor usage limits on your phone, with the desktop dock's rings, home-screen widgets in any size, and reset alerts. It's a companion to [UsageNotch for Windows](https://github.com/Arnav-Dugad/UsageNotch-Windows).
 
 ## Download
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.1.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
-| **UsageNotch Link** for your Windows PC | `UsageNotch-Link-1.1.0-win-x64.zip` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
-| **UsageNotch for Windows** 2.2.0 or newer | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.2.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **UsageNotch for Windows** 2.3 or newer, which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
 
-> **If 1.0.0 or 1.0.1 closed immediately on your phone**, install 1.1.0. The 1.0.1 download was accidentally built from the 1.0.0 code, so it still had the startup crash. 1.1.0 installs over either version.
-
-The APK is sideloaded, not from the Play Store. When you open it, Android asks you to allow installs from your browser or file manager. Future versions install over it, and the app tells you when one is available.
+The APK is sideloaded, not from the Play Store. When you open it, Android asks you to allow installs from your browser or file manager. Updates install over it, and the app tells you when one is available. If an earlier version closed immediately on your phone, install 1.2.0: the 1.0.x startup crash was fixed in 1.1.
 
 <p>
-<img src="docs/images/phone-onboarding.png" width="220" alt="Pairing screen with Import PC pairing and Paste pairing code buttons" />
-<img src="docs/images/phone-overview.png" width="220" alt="Overview with sample data: Claude 5-hour window 73% remaining, countdown and weekly window" />
-<img src="docs/images/home-widget-offline.png" width="250" alt="Home-screen widget while the PC is offline: saved Claude readings and a Codex window marked Renewed" />
+<img src="docs/images/phone-overview.png" width="220" alt="Overview: a dock of rings with Claude, Codex and Gemini logos, 73% and 7d 59% under Claude, then Claude's card" />
+<img src="docs/images/phone-card.png" width="220" alt="Claude card: Current session 73% left with a green bar, Resets in 02:10:33, Resets today at 8:49 AM; All models; Sonnet weekly; Usage credits $3.50 used" />
+<img src="docs/images/widget-full.png" width="300" alt="Full widget: three rings, then Claude Current session and Codex 5-hour limit rows with reset times" />
 </p>
 
-Screens from Android 16 with sample data. The widget shows the offline state: saved readings stay visible, and the Codex window has passed its reset time.
+Screens from Android 16 with sample data.
 
-## Set up in five minutes
+## Pair in one scan
 
-1. **On Windows**, keep [UsageNotch for Windows](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) running with your AI accounts connected.
-2. Extract `UsageNotch-Link-1.1.0-win-x64.zip` and run `UsageNotch.Link.exe`. Click **Start secure link**. If Windows Firewall asks, allow it on **Private** networks.
-3. Check the address list shows your Wi-Fi (for example `192.168.1.8 · Wi-Fi`), then click **Copy pairing code** or **Export pairing file**.
-4. Get the code or file to your phone privately, for example a message to yourself or a USB copy. It's an access key, so don't post it anywhere public.
-5. **On Android**, tap **Paste pairing code** or **Import PC pairing**. You can also open a `.usagenotch` file straight from your file manager.
-6. Open **Widgets → Add to home screen**. Turn on **Reset alerts** in Settings if you want a notification when a limit resets.
+1. **On Windows**, update to [UsageNotch 2.3](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) (installed copies update themselves). Open **Settings → Phone** and turn on **Share usage with paired phones**. If Windows Firewall asks, allow **Private networks**.
+2. **On Android**, open UsageNotch and tap **Scan QR code**. Point the phone at the code on your PC.
 
-Tick **Start with Windows in the background** in Link, and it keeps your phone updated without you opening it again. Closing its window leaves it running in the notification area.
+That's it. With no app installed yet, scan the code with the phone's camera: the page that opens offers the download, then hands the pairing to the app in one tap. The app always asks before pairing from a link.
 
-## When your PC is off or you're away from home
+Other ways to pair: **Paste pairing code** (Copy pairing code on the PC, send it to yourself) or **Import PC pairing** (Save pairing file on the PC). Phone and PC need the same Wi-Fi or a private VPN such as Tailscale.
 
-- **Everything keeps working offline.** The app and widgets show your last readings with their age, countdowns keep running, and the status reads *PC offline*, not an error.
-- **Limits that reset while you're away show Renewed.** At each reset time the widget flips to *Renewed*, and with Reset alerts on your phone notifies you ("Claude limit renewed"). This comes from your saved readings, so it works with the laptop shut down.
-- **Optional internet sync** gets fresh readings on mobile data or any Wi-Fi. In Link, open **Internet sync**, create a GitHub token with *Gists: Read and write*, and paste it. Then export a new pairing code and paste it on your phone. Link encrypts each reading with AES-256-GCM before uploading it to a **secret gist in your own GitHub account**. The key exists only in your pairing file, so GitHub stores ciphertext only. After the PC shuts down, the phone can still fetch the last reading it uploaded. GitHub caches gist files for up to about five minutes, so a brand-new reading can take that long to arrive.
+**Already using UsageNotch Link?** Windows 2.3 includes it. Open Settings → Phone and choose **Switch to built-in**. Your phone stays paired: same key, same certificate.
 
-**Limits of this approach:** a phone can't observe *new* usage while every PC running UsageNotch is off. Only the Windows app talks to Claude, ChatGPT, Gemini and Cursor, because that's where your sign-ins live. UsageNotch deliberately doesn't copy those credentials to your phone. After a reset, the app says *Renewed* and waits for the next real reading rather than guessing a percentage.
+## Widgets in any size
+
+Add them from the **Widgets** tab or your launcher's widget list, then resize freely. Each size gets a layout that fits:
+
+<img src="docs/images/widget-sizes.png" width="640" alt="Widget sizes: a full overview, a focus widget with a large dual ring and limits, a dock row, a two-ring square, a single focus ring, a vertical dock column and 1×1 rings" />
+
+- **1×1**: one ring with the provider's logo and percentage.
+- **A row or a column**: the desktop dock, with each provider's ring, percentage and "7d" weekly figure.
+- **Larger**: the rings plus each limit's colour-graded bar and reset time.
+- **Focus widget**: one provider with a big dual ring (outer: session, inner: weekly). Long-press it to choose the provider.
+
+Rings use the desktop's exact colour ramp (green → amber → red as a limit fills) and the real Claude, OpenAI, Gemini and Cursor marks. Widgets follow your Light/Dark choice.
 
 ## What you get
 
-- Every provider the Windows app records, including Claude, Codex, Gemini, Cursor and API spend, with each usage window kept separate.
-- Percentage left or used, second-by-second countdowns, exact local reset times, AM/PM or 24-hour clock.
-- A 24-hour chart of observed readings. Gaps and resets are never joined into a misleading line.
-- Overview and single-provider widgets with a refresh button and clearly dated readings.
-- Reset alerts, update notices, reduced motion, and phone and tablet layouts.
-- Safe mode: if the app ever fails to start twice in a row, it opens a plain screen where you can share a crash report or clear its data.
+- The desktop popup's layout for every provider: *Updated just now*, account name (when the dock shows it), a Live/Saved/Sign in status pill, each limit with its bar, amount, live *Resets in* countdown and local *Resets today at 3:29 PM*.
+- Usage inspector with a 24-hour chart; gaps and resets are never joined.
+- Dock strip: tap a ring to jump to its card. Pull down to refresh.
+- Reset alerts, update notices, Light/Dark/System theme, reduced motion, 12/24-hour clock.
+- Pay-as-you-go credits and API spend shown with their amounts.
+- Safe mode: if the app ever fails to start twice, it opens a plain screen to share a crash report or clear its data.
+
+## When your PC is off or you're away
+
+- **Everything keeps working offline.** Saved readings stay visible with their age, countdowns keep running, and the status reads *PC offline*.
+- **Limits that reset show Renewed.** Widgets flip at the reset time. With Reset alerts on, your phone notifies you ("Claude limit renewed"). This works with the laptop shut down.
+- **Optional internet sync** gets readings on mobile data. In Windows Settings → Phone, paste a GitHub token with *Gists: Read and write* and turn on internet sync, then scan the new code. Each reading is encrypted on your PC (AES-256-GCM) and stored in a **secret gist in your own GitHub account**. Only your paired phone has the key. GitHub caches gist files for up to about five minutes.
+
+A phone can't observe *new* usage while every PC running UsageNotch is off. Your AI sign-ins stay on Windows, and nothing copies them to your phone.
 
 ## Privacy and security
 
-- AI credentials, account names and account IDs never leave Windows. The phone receives percentages, reset times and recent readings.
-- Wi-Fi pairing uses HTTPS pinned to your PC's exact certificate, plus a random 256-bit key. The app rejects plain HTTP, redirects and public addresses. The pairing is encrypted with Android Keystore and excluded from backups.
-- Internet sync is off by default. When it's on, only ciphertext leaves your PC, in a secret gist you own. Your GitHub token stays on the PC, encrypted with Windows DPAPI. Turning sync off deletes the gist.
-- **Revoke all paired phones** in Link invalidates every pairing file and code, including their internet sync key.
-- No ads, analytics or tracking. The app contacts only your PC, your sync gist if you set one up, and GitHub Releases for update checks, which you can turn off.
-- Widgets are visible to anyone who sees your home screen.
+- AI credentials and account identifiers never leave Windows. The phone receives percentages, limits, reset times, 24 hours of readings, and the account display name only if the dock shows it.
+- Wi-Fi pairing uses HTTPS pinned to your PC's own certificate plus a random 256-bit key. Plain HTTP, redirects and public addresses are rejected. The pairing is encrypted with Android Keystore and excluded from backups.
+- The QR code keeps its pairing in the part of the web address browsers never send to a server. The pairing page removes it from the address bar immediately.
+- The QR scanner is Google Play services' on-device scanner. UsageNotch gets no camera permission, and the image stays on the phone.
+- **Revoke all paired phones** (Windows Settings → Phone) invalidates every code and file, including the internet sync key.
+- No ads, analytics or tracking. The app contacts your PC, your sync gist if you set one up, and GitHub Releases for update checks (can be turned off).
 
 ## Troubleshooting
 
 | What you see | What to do |
 | --- | --- |
-| *Couldn't reach your PC* while pairing | In Link, click **Start secure link**, pick the Wi-Fi address (not `vEthernet`/WSL), and allow Link on Private networks in Windows Firewall. Phone and PC must share a Wi-Fi network or private VPN such as Tailscale. |
+| *Couldn't reach your PC* | In Windows Settings → Phone, check sharing is on and your Wi-Fi address is selected (not `vEthernet`/WSL). Allow UsageNotch on Private networks in Windows Firewall. |
+| The scanner doesn't open | It needs Google Play services. Use **Paste pairing code** instead. |
 | *PC offline* | Normal while the PC sleeps or you're away. Turn on internet sync for readings away from home. |
-| *Pairing was revoked* or *PC identity changed* | Export a new pairing code in Link and paste it on the phone. |
-| Widget time looks old | Android runs background refresh about every 15 minutes and can delay it to save battery. Tap ↻ on the widget. |
-| The app closed unexpectedly | Reopen it and tap **Share report** on the notice, then [open an issue](https://github.com/Arnav-Dugad/UsageNotch-Android/issues). Reports contain the version, phone model and error only. |
+| *Pairing was revoked* or *PC identity changed* | Scan the new code in Windows Settings → Phone. |
+| The widget time looks old | Android refreshes about every 15 minutes and may delay it to save battery. Tap ↻ on a large widget. |
+| The app closed unexpectedly | Reopen it and tap **Share report**, then [open an issue](https://github.com/Arnav-Dugad/UsageNotch-Android/issues). |
 
 ## Build from source
 
@@ -80,13 +91,6 @@ JDK 17–25, Android SDK 36 and the included Gradle wrapper:
 ./gradlew :app:assembleSmoke   # optimized (R8) build signed with the debug key, for launch tests
 ```
 
-Windows Link (.NET 8):
+The `companion/` folder holds the standalone UsageNotch Link for Windows 2.2 and older. Windows 2.3 includes it. See [releasing](docs/RELEASING.md) and [verification](docs/VERIFICATION.md). The package is `io.github.arnavdugad.usagenotch`, and updates must use the same signing certificate.
 
-```powershell
-dotnet build companion/UsageNotch.Link.csproj -c Release
-dotnet companion/bin/Release/net8.0-windows/UsageNotch.Link.dll --self-test
-```
-
-See [releasing](docs/RELEASING.md) and [verification](docs/VERIFICATION.md). Release APKs are signed with a persistent private key. The package is `io.github.arnavdugad.usagenotch`, and updates must use the same certificate.
-
-Independent community project, not affiliated with Anthropic, OpenAI, Google, Cursor or GitHub.
+Independent community project, not affiliated with Anthropic, OpenAI, Google, Cursor or GitHub. Brand marks: Simple Icons (CC0) and Lobe Icons (MIT).
