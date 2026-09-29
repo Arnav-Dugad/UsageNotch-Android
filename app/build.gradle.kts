@@ -7,8 +7,8 @@ android {
         applicationId = "io.github.arnavdugad.usagenotch"
         minSdk = 28
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -47,8 +47,13 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
-    // Google's on-device QR scanner (Play services): no camera permission, no image leaves the phone.
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // In-app QR scanner: CameraX preview with ZXing decoding. Pure Java, no Play services module and no native libraries.
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.zxing:core:3.5.3")
+    // Frosted-glass blur for the floating dock strip (falls back to a translucent scrim before Android 12).
+    implementation("dev.chrisbanes.haze:haze:1.6.10")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250107")

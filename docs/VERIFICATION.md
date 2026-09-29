@@ -1,5 +1,23 @@
 # Verification
 
+## 1.3.0 (September 29, 2026)
+
+Checked on a Samsung Galaxy S23+ (Android 16, One UI) over USB, paired with UsageNotch for Windows, and on Android 16 and Android 9 emulators.
+
+- **Scanner on the S23+:** 1.2.0's Play services scanner reported "not available" on this phone. In 1.3.0, *Scan a new code* opened the in-app camera with a live preview. A screenshot of a non-pairing QR code, chosen through the photo picker, was decoded on the phone and rejected with "That QR code isn't a UsageNotch pairing", leaving the real pairing untouched. On the Android 9 emulator the camera permission prompt appeared and the preview started after allowing it.
+- **Upgrade on the S23+:** the signed 1.3.0 installed over 1.2.0 and kept the pairing. It loaded live readings from the PC over Wi-Fi.
+- **Full-screen view:** tapping the Claude ring opened it with the real session (78% remaining, countdown, 24-hour chart with 249 readings). Dragging across the chart moved the crosshair between readings and showed each reading's value and time. Back returned to the dashboard.
+- **History with real data:** with Windows 2.4.0 running, the History tab showed 4 of 7 days recorded, a 3-day streak, the busiest day, the busiest hours and outlined unobserved hours. With Windows 2.3.0 it shows the "History comes from your PC" notice instead.
+- **Live countdown:** turned on in Settings, it posted an ongoing notification ("Claude · 77% left", countdown, Claude logo on the progress bar). Android 16 flagged it `PROMOTED_ONGOING`, so it shows as a Live Update.
+- **Quick Settings tile:** *Add tile* on the Widgets tab opened the system's add dialog. After adding it, the tile read "Claude, 77% left".
+- **Glass dock:** scrolling past the dock showed the compact floating copy with both rings.
+- **Wallpaper colors:** turning them on recoloured the app from the S23+'s wallpaper. This check found that switching reset the app to Overview (the theme placed the app at two different spots); that was fixed, a UI test now covers it, and on the phone switching back off kept Settings open.
+- **Optimized build:** the R8 smoke build passes `packaging/launch-check.sh` on the Android 16 and Android 9 emulators. On Android 9, sample data, the full-screen view, History, the new settings and the scanner ran with an empty crash log.
+- **Tests:** 48 unit and Robolectric tests pass. New ones parse history and forecasts from Windows 2.4's fixtures (days without readings stay empty), ignore malformed history, rank busiest hours without unobserved cells, adopt and drop internet sync from the local link while rejecting other addresses, fire usage alerts once per threshold and reset period, send a pace alert only within two hours of the limit and before the reset, word the forecast line, and decode pairing QR codes, including light-on-dark ones, with the in-app decoder. UI tests cover the History tab, opening and closing the full-screen view, and the new settings.
+- **Lint:** no errors.
+
+Not verified here: pairing by pointing the camera at the PC screen (decoding was verified from a screenshot and in tests), usage and pace alerts firing on a device (covered by tests; readings didn't cross a threshold during the check), internet sync switching over on a device (needs the owner's GitHub sign-in), and lock-screen widgets (the S23+ doesn't offer them).
+
 ## 1.2.0 (September 29, 2026)
 
 Checked with UsageNotch for Windows 2.3.0 on the development PC and an Android 16 emulator. The Samsung Galaxy S23+ (Android 16) was connected over USB and running 1.1.0 without crashes. It showed the old 1.0.x startup crash in its crash log, then disconnected from ADB during the 1.2.0 install, so the final 1.2.0 checks ran on emulators.

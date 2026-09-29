@@ -59,8 +59,7 @@ class SyncJobService : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         scope.launch {
             try { Repository(applicationContext).refresh() } catch (_: Throwable) { }
-            runCatching { updateWidgets(applicationContext) }
-            runCatching { ResetAlerts.schedule(applicationContext) }
+            afterNewData(applicationContext)
             jobFinished(params, false) // Periodic work retries next interval; avoid waking an unreachable PC repeatedly.
         }
         return true
@@ -73,8 +72,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         runCatching { scheduleRefresh(context) }
-        runCatching { ResetAlerts.schedule(context) }
-        runCatching { updateWidgets(context) }
+        afterNewData(context)
     }
 }
 open class UsageWidget : AppWidgetProvider() {

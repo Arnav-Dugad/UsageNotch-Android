@@ -82,11 +82,24 @@ fun darkFor(context: Context, appearance: String): Boolean = when (appearance) {
     else -> (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 }
 
-@Composable fun NotchTheme(appearance: String = "system", content: @Composable () -> Unit) {
+/** Surfaces taken from the wallpaper (Android 12+). Rings keep the brand logos and the usage colour ramp. */
+fun dynamicTokens(scheme: androidx.compose.material3.ColorScheme, dark: Boolean) = Tokens(dark, scheme.surface, scheme.surfaceContainerLow, scheme.surfaceContainer,
+    scheme.surfaceContainerHighest, scheme.outlineVariant.copy(alpha = .6f), scheme.onSurface, scheme.onSurfaceVariant, scheme.outline, scheme.primary, scheme.onPrimary,
+    scheme.onSurface.copy(alpha = .14f), scheme.onSurface)
+
+@Composable fun NotchTheme(appearance: String = "system", wallpaper: Boolean = false, content: @Composable () -> Unit) {
     val dark = when (appearance) { "light" -> false; "dark" -> true; else -> isSystemInDarkTheme() }
-    val t = if (dark) DarkTokens else LightTokens
-    val scheme = if (dark) darkColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
-        else lightColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val t: Tokens; val scheme: androidx.compose.material3.ColorScheme
+    if (wallpaper && android.os.Build.VERSION.SDK_INT >= 31) {
+        scheme = if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
+        t = dynamicTokens(scheme, dark)
+    } else {
+        t = if (dark) DarkTokens else LightTokens
+        scheme = if (dark) darkColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
+            else lightColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
+    }
+    // One call site for the content, so switching wallpaper colors keeps the current tab and scroll position.
     CompositionLocalProvider(LocalTokens provides t) { MaterialTheme(colorScheme = scheme, content = content) }
 }
 
@@ -112,6 +125,10 @@ object RingPainter {
     class Spec(
         val shown: Float?, val used: Double?, val secondaryShown: Float?, val secondaryUsed: Double?,
         val status: String, val renewed: Boolean, val track: Int, val logo: Drawable?, val logoScale: Float = 0.43f,
+        /** 0..1: a soft glow under the arc, pulsed by the app above 90% used (static images use 0). */
+        val glow: Float = 0f,
+        /** A bright head on the arc while a new reading sweeps in. */
+        val head: Boolean = false,
     )
     fun draw(canvas: Canvas, cx: Float, cy: Float, size: Float, density: Float, spec: Spec) {
         if (size < 8f) return
@@ -119,7 +136,21 @@ object RingPainter {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
         val stroke = (size * 0.052f).coerceIn(1.8f * density, 4.2f * density)
         val radius = size / 2 - stroke / 2 - size * 0.045f
-        ring(canvas, paint, cx, cy, radius, stroke, spec.track, if (spec.renewed) null else spec.shown, spec.used)
+        val shownPrimary = if (spec.renewed) null else spec.shown
+        if (spec.glow > 0f && shownPrimary != null && shownPrimary > 0f) {
+            val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = stroke * 2.2f
+                color = Palette.usage(spec.used ?: 0.0); alpha = (spec.glow.coerceIn(0f, 1f) * 110).toInt()
+                maskFilter = android.graphics.BlurMaskFilter(stroke * 1.8f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+            }
+            canvas.drawArc(RectF(cx - radius, cy - radius, cx + radius, cy + radius), -90f, shownPrimary.coerceIn(0f, 1f) * 360f, false, glow)
+        }
+        ring(canvas, paint, cx, cy, radius, stroke, spec.track, shownPrimary, spec.used)
+        if (spec.head && shownPrimary != null && shownPrimary > 0.01f) {
+            val a = Math.toRadians(-90.0 + shownPrimary.coerceIn(0f, 1f) * 360.0)
+            val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0xE6FFFFFF.toInt() }
+            canvas.drawCircle(cx + radius * cos(a).toFloat(), cy + radius * sin(a).toFloat(), stroke * .42f, dot)
+        }
         if (spec.secondaryShown != null || spec.secondaryUsed != null) {
             val innerStroke = max(1.3f * density, stroke * .62f)
             val innerRadius = radius - stroke - size * 0.05f
@@ -148,9 +179,9 @@ object RingPainter {
         canvas.drawArc(RectF(cx - radius, cy - radius, cx + radius, cy + radius), -90f, fraction.coerceIn(0f, 1f) * 360f, false, paint)
     }
     /** Ring inputs for a provider, following the dock: outer ring the session window, inner ring the weekly one. */
-    fun specFor(p: Provider, remaining: Boolean, now: Long, track: Int, logo: Drawable?, primary: Float? = null, secondary: Float? = null): Spec {
+    fun specFor(p: Provider, remaining: Boolean, now: Long, track: Int, logo: Drawable?, primary: Float? = null, secondary: Float? = null, glow: Float = 0f, head: Boolean = false): Spec {
         val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
         return Spec(primary ?: s?.shown(remaining)?.toFloat(), s?.used, w?.let { secondary ?: it.shown(remaining).toFloat() }, w?.used,
-            p.status, s?.resetPassed(now) == true, track, logo)
+            p.status, s?.resetPassed(now) == true, track, logo, glow = glow, head = head)
     }
 }

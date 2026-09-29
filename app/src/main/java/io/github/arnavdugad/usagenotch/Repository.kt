@@ -76,7 +76,8 @@ class Repository(val context: Context) {
             ?: pair.relay?.let { relay -> runCatching { fetchRelay(relay) }.getOrNull()?.let { it to "internet" } }
             ?: throw lan.exceptionOrNull() ?: IOException("PC unreachable")
         Snapshot.parse(response)
-        vault.save(pair)
+        val adopted = Snapshot.relayUpdate(response)?.let { (state, relay) -> pair.copy(relay = if (state == "on") relay else null) } ?: pair
+        vault.save(adopted)
         val now = System.currentTimeMillis()
         check(cache.edit().clear().putString("snapshot", response).putLong("sync", now).putLong("checked", now).putString("source", source).commit())
     } }
@@ -88,6 +89,7 @@ class Repository(val context: Context) {
         cache.edit().putLong("attempt", now).apply()
         val lanProblem = try {
             val raw = fetch(pair); Snapshot.parse(raw)
+            adoptRelay(pair, raw)
             return@withLock accept(raw, Source.Lan, now)
         } catch (_: CertificateException) { "PC identity changed. Export a new pairing file from UsageNotch Link." }
         catch (e: javax.net.ssl.SSLException) {
@@ -113,6 +115,15 @@ class Repository(val context: Context) {
         if (lanProblem != null) fail(lanProblem, now)
         else { cache.edit().putLong("checked", now).putBoolean("offline", true).putString("error", "").apply(); false }
     } }
+    /**
+     * The PC says over the pinned, authenticated local link whether internet sync is on and with which key, so turning it
+     * on or off on the PC needs nothing on the phone. A snapshot that doesn't mention it (older PCs) leaves the pairing as is.
+     */
+    private fun adoptRelay(pair: Pairing, raw: String) {
+        val (state, relay) = Snapshot.relayUpdate(raw) ?: return
+        val wanted = if (state == "on") relay else null
+        if (wanted != pair.relay) runCatching { vault.save(pair.copy(relay = wanted)) }
+    }
     private fun accept(raw: String, source: Source, now: Long): Boolean {
         check(cache.edit().putString("snapshot", raw).putLong("sync", now).putLong("checked", now).putString("source", if (source == Source.Internet) "internet" else "lan").putBoolean("offline", false).putString("error", "").commit())
         return true

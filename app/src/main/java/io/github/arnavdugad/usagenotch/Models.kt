@@ -11,9 +11,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 data class Reading(val at: Long, val used: Double, val period: String)
+/** The desktop's usage-pace estimate: its own summary, the pace in percentage points per hour, and when the limit would be reached (if before the reset). */
+data class Forecast(val summary: String, val rate: Double?, val projected: Double?, val limitAt: Long?, val confidence: String)
 data class UsageWindow(
     val id: String, val label: String, val used: Double, val at: Long, val reset: Long?, val points: List<Reading>,
     val detail: String? = null, val usedAmount: Double? = null, val limitAmount: Double? = null, val unit: String? = null,
+    val forecast: Forecast? = null,
 ) {
     fun percent(remaining: Boolean) = ((if (remaining) (1 - used).coerceIn(0.0, 1.0) else used) * 100).roundToInt()
     /** The provider's reported reset time has passed since this reading was taken. */
@@ -23,10 +26,21 @@ data class UsageWindow(
 }
 /** A reported limit without a percentage, such as pay-as-you-go credits. */
 data class Extra(val id: String, val label: String, val detail: String?, val reset: Long?, val usedAmount: Double?, val limitAmount: Double?, val unit: String?)
+/** One local date of consumption as a fraction of the limit; null when the PC recorded nothing that day. */
+data class Day(val date: String, val used: Double?)
+/**
+ * 30 days of one window from the PC: daily consumption, a weekday x hour heatmap (index weekday*24+hour, Sunday first),
+ * the number of distinct observed hours per cell (so missing data is never shown as quiet), and the current streak.
+ */
+data class History(val window: String, val label: String, val days: List<Day>, val heat: List<Double>, val observed: List<Int>, val streak: Int) {
+    fun last(n: Int) = days.takeLast(n)
+    /** The busiest observed cells, most first, as (weekday 0=Sunday, hour, consumption). */
+    fun busiest(count: Int = 3) = heat.indices.filter { observed.getOrElse(it) { 0 } > 0 && heat[it] > .0001 }.sortedByDescending { heat[it] }.take(count).map { Triple(it / 24, it % 24, heat[it]) }
+}
 data class Provider(
     val id: String, val name: String, val status: String, val windows: List<UsageWindow>,
     val statusText: String? = null, val account: String? = null, val updatedAt: Long? = null, val manageUrl: String? = null,
-    val session: String? = null, val weekly: String? = null, val extras: List<Extra> = emptyList(),
+    val session: String? = null, val weekly: String? = null, val extras: List<Extra> = emptyList(), val history: List<History> = emptyList(),
 ) {
     /** The window the desktop dock's outer ring shows. */
     fun sessionWindow(): UsageWindow? = windows.firstOrNull { it.id == session } ?: when (providerKind(id)) {
@@ -50,6 +64,25 @@ data class Snapshot(val generatedAt: Long, val providers: List<Provider>, val so
     /** Time of the most recent reading the PC observed, used to never replace newer data with older data. */
     fun newestReading() = providers.flatMap { it.windows }.maxOfOrNull { it.at } ?: 0L
     companion object {
+        private fun parseHistory(p: JSONObject): List<History> {
+            val list = p.optJSONArray("history") ?: return emptyList()
+            return (0 until minOf(list.length(), 4)).mapNotNull { i -> runCatching {
+                val h = list.getJSONObject(i); val days = h.getJSONArray("days"); val heat = h.getJSONArray("heat"); val observed = h.getJSONArray("observed")
+                require(days.length() <= 60 && heat.length() == 168 && observed.length() == 168)
+                History(h.getString("window").take(100), h.getString("label").take(80),
+                    (0 until days.length()).map { d -> val day = days.getJSONObject(d); Day(day.getString("date").take(10), if (day.isNull("used") || !day.has("used")) null else day.getDouble("used").takeIf { it.isFinite() && it >= 0 }) },
+                    (0 until 168).map { heat.getDouble(it).takeIf { v -> v.isFinite() && v >= 0 } ?: 0.0 }, (0 until 168).map { observed.getInt(it).coerceAtLeast(0) }, h.optInt("streak", 0).coerceIn(0, 10_000))
+            }.getOrNull() }
+        }
+        /** Internet sync details handed over the pinned local link: the new relay, "off", or null when the PC doesn't say. */
+        fun relayUpdate(raw: String): Pair<String, Relay?>? = runCatching {
+            val root = JSONObject(raw)
+            when (root.optString("relayState")) {
+                "on" -> "on" to Relay.parse(root.getJSONObject("relay"))
+                "off" -> "off" to null
+                else -> null
+            }
+        }.getOrNull()
         private fun JSONObject.text(key: String, max: Int): String? = if (has(key) && !isNull(key)) getString(key).take(max).ifBlank { null } else null
         private fun JSONObject.number(key: String): Double? = if (has(key) && !isNull(key)) getDouble(key).takeIf { it.isFinite() } else null
         private fun JSONObject.time(key: String): Long? = if (has(key) && !isNull(key)) getLong(key) else null
@@ -71,11 +104,13 @@ data class Snapshot(val generatedAt: Long, val providers: List<Provider>, val so
                     require((points?.length() ?: 0) <= 512)
                     UsageWindow(w.getString("id").take(100), w.getString("label").take(80), used, w.getLong("at"), w.time("reset"),
                         (0 until (points?.length() ?: 0)).map { n -> val r = points!!.getJSONObject(n); val u = r.getDouble("used"); require(u.isFinite() && u >= 0 && u <= 1000); Reading(r.getLong("at"), u, r.getString("period").take(80)) }.sortedBy { it.at },
-                        w.text("detail", 160), w.number("usedAmount"), w.number("limitAmount"), w.text("unit", 12))
+                        w.text("detail", 160), w.number("usedAmount"), w.number("limitAmount"), w.text("unit", 12),
+                        w.optJSONObject("forecast")?.let { f -> Forecast(f.optString("summary").take(120), f.number("rate"), f.number("projected"), f.time("limitAt"), f.optString("confidence").take(60)) })
                 }, p.text("statusText", 400), p.text("account", 80), p.time("updatedAt"), https(p.text("manageUrl", 300)),
                     p.text("session", 100), p.text("weekly", 100),
                     (0 until (extras?.length() ?: 0)).map { n -> val e = extras!!.getJSONObject(n)
-                        Extra(e.getString("id").take(100), e.getString("label").take(80), e.text("detail", 160), e.time("reset"), e.number("usedAmount"), e.number("limitAmount"), e.text("unit", 12)) })
+                        Extra(e.getString("id").take(100), e.getString("label").take(80), e.text("detail", 160), e.time("reset"), e.number("usedAmount"), e.number("limitAmount"), e.text("unit", 12)) },
+                    parseHistory(p))
             }, root.optString("source").take(40).ifBlank { null }, root.optString("appVersion").take(20).ifBlank { null })
         }
     }

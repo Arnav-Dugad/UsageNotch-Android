@@ -16,6 +16,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,6 +41,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
@@ -67,7 +74,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val repo = remember { Repository(this) }
             var appearance by remember { mutableStateOf(repo.appearance()) }
-            NotchTheme(appearance) { NotchApp(incoming, { incoming = null }, link, { link = null }, appearance) { appearance = it } }
+            var wallpaper by remember { mutableStateOf(repo.prefs.getBoolean("wallpaperColors", false)) }
+            NotchTheme(appearance, wallpaper) { NotchApp(incoming, { incoming = null }, link, { link = null }, appearance, { appearance = it }, wallpaper) { wallpaper = it } }
         }
         // Surviving the first seconds clears the startup-crash counter used for safe mode.
         window.decorView.postDelayed({ CrashLog.settled(this) }, 8_000)
@@ -104,15 +112,15 @@ internal fun readBounded(stream: InputStream, max: Int): ByteArray {
     while (true) { val count = stream.read(buffer, 0, min(buffer.size, max + 1 - output.size())); if (count < 0) break; output.write(buffer, 0, count); require(output.size() <= max) { "File too large" } }
     return output.toByteArray()
 }
-private tailrec fun Context.activity(): Activity? = when (this) { is Activity -> this; is ContextWrapper -> baseContext.activity(); else -> null }
 private const val NOT_A_PAIRING = "That isn't a UsageNotch pairing. On your PC, open UsageNotch → Settings → Phone and scan the code shown there."
 private const val UNREADABLE = "Couldn't open that file. Save it to your phone first (for example in Downloads), then try again, or scan the QR code instead."
 private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Windows, open Settings → Phone and turn on sharing. Keep both devices on the same Wi-Fi or private VPN, and allow UsageNotch through Windows Firewall on Private networks."
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable fun NotchApp(
     incoming: Uri? = null, incomingHandled: () -> Unit = {}, link: String? = null, linkHandled: () -> Unit = {},
     appearance: String = "system", appearanceChanged: (String) -> Unit = {},
+    wallpaper: Boolean = false, wallpaperChanged: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current; val repo = remember { Repository(context) }; val scope = rememberCoroutineScope(); val t = LocalTokens.current
     var snapshot by remember { mutableStateOf(repo.snapshot()) }; var pairing by remember { mutableStateOf(repo.pairing()) }
@@ -126,10 +134,17 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
     var crash by remember { mutableStateOf(CrashLog.report(context)) }; var pasting by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pairing?>(null) }; var confirmText by remember { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var detail by rememberSaveable { mutableStateOf<String?>(null) }; var scanning by rememberSaveable { mutableStateOf(false) }
+    var liveUpdate by remember { mutableStateOf(LiveUpdate.enabled(context) && ResetAlerts.canNotify(context)) }
+    var usageAlerts by remember { mutableStateOf(UsageAlerts.enabled(context) && ResetAlerts.canNotify(context)) }
+    var followed by remember { mutableStateOf(repo.prefs.getString("liveProvider", null)) }
+    var askingFor by remember { mutableStateOf<String?>(null) }
+    val historyState = rememberHistoryState()
+    val hazeState = rememberHazeState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val listState = rememberLazyListState()
     fun reload() { snapshot = repo.snapshot(); pairing = repo.pairing(); error = repo.error(); offline = repo.offline(); source = repo.source(); update = Updates.available(context) }
-    fun afterSync() { reload(); runCatching { updateWidgets(context) }; runCatching { ResetAlerts.schedule(context) } }
+    fun afterSync() { reload(); afterNewData(context) }
     fun refresh() { if (!busy) scope.launch { busy = true; refreshing = true; try { repo.refresh() } catch (_: Exception) { } finally { afterSync(); busy = false; refreshing = false } } }
     fun importPairing(read: suspend () -> String) {
         if (busy) return
@@ -144,16 +159,7 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
         }
     }
     fun readUri(uri: Uri) = importPairing { withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { String(readBounded(it, 16_384), Charsets.UTF_8) } ?: error("Could not open file") } }
-    fun scan() {
-        val activity = context.activity() ?: return
-        PairScanner.scan(activity) { result ->
-            when (result) {
-                is PairScanner.Result.Code -> importPairing { result.text }
-                is PairScanner.Result.Unavailable -> pairError = result.reason
-                PairScanner.Result.Cancelled -> Unit
-            }
-        }
-    }
+    fun scan() { pairError = ""; scanning = true }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(owner) {
         owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -173,7 +179,17 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
     // Links can come from any web page, so they are confirmed before replacing a pairing.
     LaunchedEffect(link) { link?.let { text -> runCatching { Pairing.parse(text) }.onSuccess { confirm = it; confirmText = text }.onFailure { pairError = NOT_A_PAIRING }; linkHandled() } }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) readUri(uri) }
-    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> alerts = granted; ResetAlerts.setEnabled(context, granted) }
+    fun applyNotify(key: String, on: Boolean) = when (key) {
+        "reset" -> { alerts = on; ResetAlerts.setEnabled(context, on) }
+        "live" -> { liveUpdate = on; LiveUpdate.setEnabled(context, on) }
+        else -> { usageAlerts = on; UsageAlerts.setEnabled(context, on); UsageAlerts.evaluate(context) }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> askingFor?.let { applyNotify(it, granted) }; askingFor = null }
+    // Notifications need permission on Android 13+; ask only when a notification setting is switched on.
+    fun setNotify(key: String, on: Boolean) {
+        if (on && !ResetAlerts.canNotify(context) && Build.VERSION.SDK_INT >= 33) { askingFor = key; notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        else applyNotify(key, on)
+    }
     fun save(key: String, value: Boolean) { repo.prefs.edit().putBoolean(key, value).apply(); runCatching { updateWidgets(context) } }
     val shown = if (demo) remember { demoSnapshot() } else snapshot
     val providers = shown?.providers.orEmpty()
@@ -183,15 +199,34 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
     val leading = listOf(true, crash != null, update != null, demo, pairError.isNotBlank() && !pasting, error.isNotBlank() && connected, true, offlineNotice, true).count { it }
     val openUrl: (String) -> Unit = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
 
+    // Back from History, Widgets or Settings returns to Overview; the page shrinks with the predictive back gesture.
+    var pageBack by remember { mutableFloatStateOf(0f) }
+    PredictiveBackHandler(enabled = detail == null && !scanning && page != 0) { progress ->
+        try { progress.collect { pageBack = it.progress }; page = 0 } finally { pageBack = 0f }
+    }
+    val open = providers.firstOrNull { it.id == detail }
+    LaunchedEffect(open == null) { if (open == null) detail = null }
+    Box(Modifier.fillMaxSize()) {
+    SharedTransitionLayout(Modifier.fillMaxSize()) {
+    AnimatedContent(open?.id, transitionSpec = {
+        if (reduced) fadeIn(snap()) togetherWith fadeOut(snap())
+        else (fadeIn(tween(300, delayMillis = 60)) + scaleIn(tween(360, easing = FastOutSlowInEasing), initialScale = .96f)) togetherWith fadeOut(tween(200))
+    }, label = "Provider detail") { openId ->
+    val visibility = this
+    // The dock ring morphs into the detail ring (and back) through a shared element.
+    val share: @Composable (String) -> Modifier = { id -> if (reduced) Modifier else Modifier.sharedElement(rememberSharedContentState("ring-$id"), visibility) }
+    val openProvider = providers.firstOrNull { it.id == openId }
+    if (openProvider != null) ProviderDetail(openProvider, now, remaining, clock24, reduced, offline && !demo, demo, share(openProvider.id), if (connected) ({ refresh() }) else null, openUrl) { detail = null }
+    else CompositionLocalProvider(LocalRingShare provides share) {
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(t.background, t.backgroundEnd)))) {
         if (t.dark) Canvas(Modifier.fillMaxSize()) {
             if (size.width <= 0f || size.height <= 0f) return@Canvas
             drawCircle(Brush.radialGradient(listOf(Color(0xFF2EE0A8).copy(alpha = .07f), Color.Transparent), center = Offset(size.width * .9f, size.height * .08f), radius = size.width * .8f), radius = size.width * .8f, center = Offset(size.width * .9f, size.height * .08f))
         }
-        Scaffold(containerColor = Color.Transparent, contentColor = t.text, bottomBar = {
+        Scaffold(Modifier.hazeSource(hazeState), containerColor = Color.Transparent, contentColor = t.text, bottomBar = {
             Panel(Modifier.navigationBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp), radius = 30.dp) {
                 Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    listOf("Overview" to Icons.Outlined.DonutLarge, "Widgets" to Icons.Outlined.Widgets, "Settings" to Icons.Outlined.Tune).forEachIndexed { index, item ->
+                    listOf("Overview" to Icons.Outlined.DonutLarge, "History" to Icons.Outlined.Insights, "Widgets" to Icons.Outlined.Widgets, "Settings" to Icons.Outlined.Tune).forEachIndexed { index, item ->
                         val on = page == index
                         val color by animateColorAsState(if (on) t.accent else t.muted, tween(if (reduced) 0 else 220), label = "Navigation tint")
                         Column(Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(if (on) t.raised else Color.Transparent).clickable(role = Role.Tab) { page = index }.semantics { this.selected = on }.padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -201,7 +236,9 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
                 }
             }
         }) { padding ->
-            AnimatedContent(targetState = page, transitionSpec = { fadeIn(tween(if (reduced) 0 else 200)) togetherWith fadeOut(tween(if (reduced) 0 else 120)) }, label = "Page transition", modifier = Modifier.padding(padding)) { current ->
+            AnimatedContent(targetState = page, transitionSpec = { fadeIn(tween(if (reduced) 0 else 200)) togetherWith fadeOut(tween(if (reduced) 0 else 120)) }, label = "Page transition", modifier = Modifier.padding(padding).graphicsLayer {
+                val scale = 1f - pageBack * .06f; scaleX = scale; scaleY = scale; alpha = 1f - pageBack * .25f
+            }) { current ->
                 val pageState = if (current == 0) listState else rememberLazyListState()
                 PullToRefreshBox(isRefreshing = refreshing, onRefresh = { if (connected) refresh() }, modifier = Modifier.fillMaxSize()) {
                 LazyColumn(Modifier.fillMaxSize(), state = pageState, contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -215,25 +252,23 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
                         0 -> {
                             item(key = "status") { StatusCard(demo, pairing, error, offline, source, repo.lastSync(), now) }
                             if (offlineNotice) item(key = "offline") {
-                                Notice("Working offline", "Your PC isn't reachable right now. Saved readings, countdowns, widgets and reset alerts keep working." + if (pairing?.relay == null) " To get readings away from home, turn on internet sync in UsageNotch → Settings → Phone, then scan the new code." else " New readings arrive once your PC is back online.", tone = t.muted)
+                                Notice("Working offline", "Your PC isn't reachable right now. Saved readings, countdowns, widgets and reset alerts keep working." + if (pairing?.relay == null) " To get readings away from home, turn on internet sync in UsageNotch → Settings → Phone on your PC. This phone picks it up by itself the next time both are on the same Wi-Fi." else " New readings arrive once your PC is back online.", tone = t.muted)
                             }
                             if (providers.isEmpty()) item(key = "pair") { PairCard(busy, connected, { scan() }, { pasting = true }, { picker.launch(arrayOf("*/*")) }, { demo = true }) }
                             else item(key = "dock") {
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(horizontal = 2.dp)) {
                                     items(providers, key = { it.id }) { p ->
-                                        DockCell(p, remaining, now, reduced, selected == p.id) {
-                                            selected = p.id
-                                            scope.launch { listState.animateScrollToItem(leading + providers.indexOf(p)) }
-                                        }
+                                        DockCell(p, remaining, now, reduced, selected == p.id) { selected = p.id; detail = p.id }
                                     }
                                 }
                             }
                             providers.forEach { p -> item(key = "p-${p.id}") {
-                                ProviderCard(p, now, remaining, clock24, reduced, offline && !demo, demo, if (connected) ({ refresh() }) else null, openUrl)
+                                ProviderCard(p, now, remaining, clock24, reduced, offline && !demo, demo, if (connected) ({ refresh() }) else null, openUrl, onOpen = { selected = p.id; detail = p.id })
                             } }
                             item(key = "footer") { Text("Each provider and limit stays separate. Readings come from UsageNotch on your PC; times are local to this phone.", color = t.faint, fontSize = 11.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 8.dp)) }
                         }
-                        1 -> {
+                        1 -> historyPage(if (demo) providers else snapshot?.providers.orEmpty(), historyState, clock24, reduced)
+                        2 -> {
                             item { Text("The desktop dock, on your home screen. Resize freely: one ring, a row, a column or the full view.", color = t.muted, fontSize = 15.sp, lineHeight = 22.sp) }
                             item { WidgetPreviews(shown ?: demoSnapshot(), now, t.dark, remaining, clock24, offline && !demo) }
                             item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -241,9 +276,11 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
                                 OutlinedButton(onClick = { pinWidget(context, true) }, modifier = Modifier.weight(1f).height(48.dp)) { Text("Add focus") }
                             } }
                             item { Text("If your launcher can't pin widgets, long-press Home → Widgets → UsageNotch. The focus widget follows one provider; long-press it to choose which.", color = t.faint, fontSize = 12.sp, lineHeight = 17.sp) }
+                            item { QuickTileCard() }
+                            item { Notice("On the lock screen", "Turn on Live countdown in Settings to see your percentage and reset countdown on the lock screen and, on Android 16, as a status-bar chip. Devices with lock-screen widgets can also add UsageNotch there.", tone = t.muted) }
                             item { Notice("Quiet in the background", "Android refreshes about every 15 minutes and may delay it to save battery. Tap ↻ on a large widget for a fresh sync. When your PC is off, widgets keep your saved readings and switch to Renewed when a limit resets.", tone = t.muted) }
                         }
-                        2 -> {
+                        3 -> {
                             item { SectionLabel("CONNECTION") }
                             item { Panel { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -253,7 +290,7 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
                                 Text(if (pairing == null) "On your PC, open UsageNotch → Settings → Phone. Turn on sharing, then scan the QR code shown there." else "Readings come straight from your PC over Wi-Fi or a private VPN.", fontSize = 13.sp, lineHeight = 19.sp, color = t.muted)
                                 if (pairing != null) Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(if (pairing?.relay != null) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff, null, tint = if (pairing?.relay != null) t.accent else t.muted, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(10.dp))
-                                    Text(if (pairing?.relay != null) "Internet sync on · end-to-end encrypted. Readings reach this phone anywhere." else "Internet sync off. Turn it on in UsageNotch → Settings → Phone, then scan the new code.", fontSize = 12.sp, lineHeight = 17.sp, color = t.muted)
+                                    Text(if (pairing?.relay != null) "Internet sync on · end-to-end encrypted. Readings reach this phone anywhere." else "Internet sync off. Turn it on in UsageNotch → Settings → Phone on your PC; this phone picks it up by itself over Wi-Fi. No new code needed.", fontSize = 12.sp, lineHeight = 17.sp, color = t.muted)
                                 }
                                 Button(onClick = { scan() }, enabled = !busy, modifier = Modifier.fillMaxWidth().height(50.dp)) { Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text(if (pairing == null) "Scan QR code" else "Scan a new code") }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -276,6 +313,10 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
                                     }
                                 }
                                 Text("Widgets follow the same theme.", fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(top = 8.dp))
+                                if (Build.VERSION.SDK_INT >= 31) {
+                                    HorizontalDivider(color = t.hairline, modifier = Modifier.padding(top = 8.dp))
+                                    SettingToggle("Wallpaper colors", "Material You: surfaces follow your wallpaper. Rings keep their usage colors.", wallpaper) { repo.prefs.edit().putBoolean("wallpaperColors", it).apply(); wallpaperChanged(it) }
+                                }
                             } } }
                             item { SectionLabel("DISPLAY & ALERTS") }
                             item { Panel { Column(Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
@@ -285,9 +326,25 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
                                 HorizontalDivider(color = t.hairline)
                                 SettingToggle("Reduce motion", "Quiet transitions and immediate ring updates.", reduced) { reduced = it; save("reduceMotion", it) }
                                 HorizontalDivider(color = t.hairline)
-                                SettingToggle("Reset alerts", "Notify me when a limit resets. Works while your PC is off.", alerts) { on ->
-                                    if (on && !ResetAlerts.canNotify(context) && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    else { alerts = on; ResetAlerts.setEnabled(context, on) }
+                                SettingToggle("Reset alerts", "Notify me when a limit resets. Works while your PC is off.", alerts) { setNotify("reset", it) }
+                                HorizontalDivider(color = t.hairline)
+                                SettingToggle("Usage alerts", "At 80% and 95% used, and when the pace says a limit runs out within 2 hours of use.", usageAlerts) { setNotify("usage", it) }
+                                HorizontalDivider(color = t.hairline)
+                                SettingToggle("Live countdown", "An ongoing notification with the percentage and a countdown to the reset, also on the lock screen." + if (Build.VERSION.SDK_INT >= 36) " Shows as a Live Update chip." else "", liveUpdate) { setNotify("live", it) }
+                                val choices = snapshot?.providers.orEmpty().filter { it.sessionWindow() != null }
+                                if (liveUpdate && choices.size > 1) Column(Modifier.padding(bottom = 12.dp)) {
+                                    Text("Follow", fontSize = 12.sp, color = t.muted)
+                                    Row(Modifier.padding(top = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        val current = focusProvider(choices, followed)?.id
+                                        choices.forEach { p ->
+                                            val on = p.id == current
+                                            Row(Modifier.clip(RoundedCornerShape(12.dp)).background(if (on) t.raised else Color.Transparent).border(1.dp, if (on) t.accent.copy(alpha = .5f) else t.hairline, RoundedCornerShape(12.dp))
+                                                .clickable(role = Role.RadioButton) { followed = p.id; repo.prefs.edit().putString("liveProvider", p.id).apply(); LiveUpdate.update(context); UsageTileService.refresh(context) }
+                                                .semantics { this.selected = on }.padding(horizontal = 11.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Logo(p.id, Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text(p.name, fontSize = 12.5.sp, color = if (on) t.text else t.muted)
+                                            }
+                                        }
+                                    }
                                 }
                                 HorizontalDivider(color = t.hairline)
                                 SettingToggle("Check for updates", "Ask GitHub Releases for a newer APK twice a day.", checkUpdates) { checkUpdates = it; save("checkUpdates", it); update = Updates.available(context) }
@@ -305,6 +362,27 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
             }
         }
         if (busy && !refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().statusBarsPadding().align(Alignment.TopCenter), color = t.accent)
+        // Once the dock scrolls away, a compact glass copy floats at the top; content blurs beneath it on Android 12+.
+        val floating by remember { derivedStateOf { listState.firstVisibleItemIndex >= leading } }
+        AnimatedVisibility(page == 0 && providers.isNotEmpty() && floating, Modifier.align(Alignment.TopCenter),
+            enter = if (reduced) fadeIn(snap()) else slideInVertically(spring(dampingRatio = .75f, stiffness = 500f)) { -it } + fadeIn(),
+            exit = if (reduced) fadeOut(snap()) else slideOutVertically(tween(180)) { -it } + fadeOut(tween(160))) {
+            val shape = RoundedCornerShape(26.dp)
+            Box(Modifier.statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp).clip(shape)
+                .hazeEffect(hazeState, HazeStyle(backgroundColor = t.background, tints = listOf(HazeTint(t.card.copy(alpha = if (t.dark) .55f else .62f))), blurRadius = 22.dp, noiseFactor = .04f, fallbackTint = HazeTint(t.card.copy(alpha = .96f))))
+                .border(1.dp, t.hairline, shape)) {
+                CompositionLocalProvider(LocalRingShare provides null) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        providers.forEach { p -> DockCell(p, remaining, now, reduced, selected == p.id, compact = true) { selected = p.id; detail = p.id } }
+                    }
+                }
+            }
+        }
+    }
+    }
+    }
+    }
+    if (scanning) ScannerScreen(reduced, { code -> scanning = false; importPairing { code } }) { scanning = false }
     }
     if (pasting) PasteDialog(busy, pairError, { pasting = false; pairError = "" }) { code -> importPairing { code } }
     confirm?.let { p ->
@@ -319,7 +397,7 @@ private const val PC_UNREACHABLE = "Couldn't reach your PC. In UsageNotch on Win
 @Composable private fun Header(page: Int, busy: Boolean, refresh: () -> Unit, connected: Boolean) {
     val t = LocalTokens.current
     Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column { Text("USAGENOTCH", fontSize = 10.sp, letterSpacing = 3.sp, color = t.accent, fontWeight = FontWeight.SemiBold); Text(listOf("Your AI, at a glance.", "Any size. Your rings.", "Perfectly yours.")[page], fontSize = 27.sp, fontWeight = FontWeight.Light, letterSpacing = (-1).sp, color = t.text, modifier = Modifier.padding(top = 8.dp)) }
+        Column { Text("USAGENOTCH", fontSize = 10.sp, letterSpacing = 3.sp, color = t.accent, fontWeight = FontWeight.SemiBold); Text(listOf("Your AI, at a glance.", "Your patterns, in time.", "Any size. Your rings.", "Perfectly yours.")[page], fontSize = 27.sp, fontWeight = FontWeight.Light, letterSpacing = (-1).sp, color = t.text, modifier = Modifier.padding(top = 8.dp)) }
         if (page == 0) IconButton(onClick = refresh, enabled = connected && !busy, modifier = Modifier.clip(CircleShape).background(t.raised)) { Icon(Icons.Outlined.Refresh, "Refresh usage", tint = if (connected) t.accent else t.muted.copy(alpha = .4f)) }
     }
 }
@@ -407,12 +485,56 @@ private fun pinWidget(context: Context, focus: Boolean) {
 }
 internal fun demoSnapshot(): Snapshot {
     val now = System.currentTimeMillis()
-    fun window(id: String, label: String, used: Double, reset: Long, detail: String? = null) = UsageWindow(id, label, used, now, reset, (0..48).map { Reading(now - (48 - it) * 1_200_000L, used * (.25 + .75 * it / 48), "preview") }, detail)
+    fun window(id: String, label: String, used: Double, reset: Long, detail: String? = null, forecast: Forecast? = null) = UsageWindow(id, label, used, now, reset, (0..48).map { Reading(now - (48 - it) * 1_200_000L, used * (.25 + .75 * it / 48), "preview") }, detail, forecast = forecast)
     return Snapshot(now, listOf(
-        Provider("claude", "Claude", "Ok", listOf(window("five_hour", "Current session", .27, now + 7_845_000), window("seven_day", "All models", .41, now + 231_845_000), window("seven_day_sonnet", "Sonnet weekly", .12, now + 231_845_000)),
+        Provider("claude", "Claude", "Ok", listOf(window("five_hour", "Current session", .27, now + 7_845_000, forecast = Forecast("Estimated 61.4% used at reset", 15.6, 61.4, null, "Consistent pace")), window("seven_day", "All models", .41, now + 231_845_000), window("seven_day_sonnet", "Sonnet weekly", .12, now + 231_845_000)),
             account = "Sample account", updatedAt = now, manageUrl = "https://claude.ai/settings/usage", session = "five_hour", weekly = "seven_day",
-            extras = listOf(Extra("extra_usage", "Usage credits", "Pay-as-you-go usage after plan limits", null, 3.5, null, "USD"))),
-        Provider("codex", "Codex", "Ok", listOf(window("codex-primary", "5-hour limit", .16, now + 11_400_000), window("codex-secondary", "Weekly limit", .49, now + 401_840_000)), updatedAt = now, manageUrl = "https://chatgpt.com/codex/settings/usage", session = "codex-primary", weekly = "codex-secondary"),
+            extras = listOf(Extra("extra_usage", "Usage credits", "Pay-as-you-go usage after plan limits", null, 3.5, null, "USD")),
+            history = listOf(demoHistory("five_hour", "Current session", 1.0, 3), demoHistory("seven_day", "All models", .16, 5))),
+        Provider("codex", "Codex", "Ok", listOf(window("codex-primary", "5-hour limit", .16, now + 11_400_000), window("codex-secondary", "Weekly limit", .49, now + 401_840_000)), updatedAt = now, manageUrl = "https://chatgpt.com/codex/settings/usage", session = "codex-primary", weekly = "codex-secondary",
+            history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11))),
         Provider("gemini", "Gemini", "Ok", listOf(window("gemini-2.5-pro", "Gemini 2.5 Pro", .72, now + 50_000_000)), updatedAt = now),
     ), "sample")
+}
+
+/** Offers the Quick Settings tile. Android 13+ can add it in one tap; older versions add it from the tile editor. */
+@Composable private fun QuickTileCard() {
+    val context = LocalContext.current; val t = LocalTokens.current
+    var result by remember { mutableStateOf<String?>(null) }
+    Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.ToggleOn, null, tint = t.accent); Spacer(Modifier.width(10.dp))
+            Text("Quick Settings tile", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = t.text)
+        }
+        Text("Your followed provider's percentage in the notification shade. Tap it to refresh from your PC.", fontSize = 12.5.sp, lineHeight = 18.sp, color = t.muted, modifier = Modifier.padding(top = 6.dp))
+        if (Build.VERSION.SDK_INT >= 33) TextButton(onClick = {
+            val bar = context.getSystemService(android.app.StatusBarManager::class.java)
+            runCatching {
+                bar.requestAddTileService(ComponentName(context, UsageTileService::class.java), "UsageNotch", android.graphics.drawable.Icon.createWithResource(context, R.drawable.ic_stat_notch), context.mainExecutor) { code ->
+                    result = when (code) {
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "Added. Swipe down to see it."
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "It's already in your Quick Settings."
+                        android.app.StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> null
+                        else -> "Swipe down twice, tap the pencil, then drag UsageNotch into your tiles."
+                    }
+                }
+            }.onFailure { result = "Swipe down twice, tap the pencil, then drag UsageNotch into your tiles." }
+        }) { Text("Add tile") }
+        else Text("Swipe down twice, tap the pencil, then drag UsageNotch into your tiles.", fontSize = 12.sp, color = t.faint, modifier = Modifier.padding(top = 6.dp))
+        result?.let { Text(it, fontSize = 12.sp, color = t.faint) }
+    } }
+}
+
+/** Illustrative 30 days for the preview: weekday afternoons busiest, a few days without readings. */
+internal fun demoHistory(window: String, label: String, scale: Double, seed: Int): History {
+    val today = java.time.LocalDate.now()
+    val random = java.util.Random(seed.toLong())
+    val days = (29 downTo 0).map { back ->
+        val date = today.minusDays(back.toLong()); val weekend = date.dayOfWeek.value >= 6
+        Day(date.toString(), if (back in setOf(12, 13, 21)) null else scale * ((if (weekend) .15 else .55) + random.nextDouble() * .45))
+    }
+    val heat = (0 until 168).map { i -> val d = i / 24; val h = i % 24; val work = d in 1..5 && h in 9..18
+        if (h in 1..6) 0.0 else scale * (if (work) .05 + .06 * kotlin.math.sin((h - 9) / 9.0 * Math.PI) else .012) * (.7 + random.nextDouble() * .6) }
+    val observed = (0 until 168).map { i -> if (i % 24 in 2..5) 0 else 3 + random.nextInt(2) }
+    return History(window, label, days, heat.mapIndexed { i, v -> if (observed[i] == 0) 0.0 else v }, observed, days.reversed().takeWhile { (it.used ?: 0.0) > 0 }.size)
 }

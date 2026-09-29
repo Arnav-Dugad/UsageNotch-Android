@@ -16,7 +16,8 @@ import android.os.Build
  * reset time the widgets refresh to "Renewed" and, when enabled, a notification is posted.
  */
 object ResetAlerts {
-    private const val CHANNEL = "resets"
+    // A gentle double-tap vibration; the first channel ("resets") had none and channel settings can't be changed after creation.
+    private const val CHANNEL = "resets-gentle"
     internal const val ACTION = "io.github.arnavdugad.usagenotch.RESET_DUE"
     fun enabled(context: Context) = Repository(context).prefs.getBoolean("resetAlerts", false)
     fun setEnabled(context: Context, on: Boolean) {
@@ -42,7 +43,10 @@ object ResetAlerts {
         repo.prefs.edit().putLong("alertedThrough", now).apply()
         if (!enabled(context) || due.isEmpty() || !canNotify(context)) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Limit resets", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "When a usage window reported by your PC resets." })
+        runCatching { manager.deleteNotificationChannel("resets") }
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Limit resets", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = "When a usage window reported by your PC resets."; enableVibration(true); vibrationPattern = longArrayOf(0, 30, 80, 30)
+        })
         val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE)
         due.entries.forEachIndexed { index, (name, windows) ->
             val labels = windows.joinToString(" and ") { it.label }
@@ -60,7 +64,6 @@ class ResetAlertReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ResetAlerts.ACTION) return
         runCatching { ResetAlerts.deliver(context) }
-        runCatching { updateWidgets(context) }
-        runCatching { ResetAlerts.schedule(context) }
+        afterNewData(context)
     }
 }

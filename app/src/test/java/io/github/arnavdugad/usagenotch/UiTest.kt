@@ -4,6 +4,8 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
@@ -34,6 +36,14 @@ class UiTest {
         compose.onAllNodesWithText("Claude").onFirst().assertExists()
         compose.onAllNodesWithText("Current session").onFirst().assertExists()
         screenshot("02-overview")
+        compose.onNodeWithText("History").performClick()
+        compose.onNodeWithText("Your patterns, in time.").assertIsDisplayed()
+        compose.onNodeWithText("Daily usage").assertExists()
+        compose.onNodeWithText("Streak").assertExists()
+        screenshot("03-history")
+        compose.onNodeWithText("30d").performClick()
+        scrollTo("Busiest: ", substring = true)
+        compose.onNodeWithText("Busiest hours").assertExists()
         compose.onNodeWithText("Widgets").performClick()
         compose.onNodeWithText("Any size. Your rings.").assertIsDisplayed()
         screenshot("03-widgets")
@@ -47,9 +57,38 @@ class UiTest {
         compose.setContent { NotchTheme("dark") { NotchApp() } }
         compose.onNodeWithText("Explore with sample data").performClick()
         // Sample: Claude session 27% used, weekly 41% used.
-        compose.onNodeWithContentDescription("Claude, 73% left, 7d 59%").assertExists()
+        compose.onNodeWithContentDescription("Claude, 73% left, 7d 59%. Open details").assertExists()
         compose.onAllNodesWithText("73% left").onFirst().assertExists()
         compose.onNodeWithText("Usage inspector", useUnmergedTree = true).assertExists()
+    }
+    @Test fun dockRingOpensTheProviderViewAndBackReturns() {
+        compose.setContent { NotchTheme("dark") { NotchApp() } }
+        compose.onNodeWithText("Explore with sample data").performClick()
+        compose.onNodeWithContentDescription("Claude, 73% left, 7d 59%. Open details").performClick()
+        compose.onNodeWithText("Pace").assertExists()
+        compose.onNodeWithText("About 61% used by the reset").assertExists()
+        compose.onNodeWithText("Last 24 hours").assertExists()
+        screenshot("07-provider-detail")
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Preview · sample data").assertIsDisplayed()
+        compose.onNodeWithText("Pace").assertDoesNotExist()
+    }
+    @Test fun notificationAndThemeSettingsArePresent() {
+        compose.setContent { NotchTheme("dark") { NotchApp() } }
+        compose.onNodeWithText("Settings").performClick()
+        scrollTo("Wallpaper colors"); compose.onNodeWithContentDescription("Wallpaper colors").assertIsOff()
+        scrollTo("Usage alerts"); compose.onNodeWithContentDescription("Usage alerts").assertIsOff()
+        scrollTo("Live countdown"); compose.onNodeWithContentDescription("Live countdown").assertIsOff()
+    }
+    @Test fun wallpaperColorsKeepTheCurrentPage() {
+        var wallpaper by androidx.compose.runtime.mutableStateOf(false)
+        compose.setContent { NotchTheme("dark", wallpaper) { NotchApp(wallpaper = wallpaper, wallpaperChanged = { wallpaper = it }) } }
+        compose.onNodeWithText("Settings").performClick()
+        scrollTo("Wallpaper colors"); compose.onNodeWithContentDescription("Wallpaper colors").performClick()
+        compose.waitForIdle()
+        assertTrue(wallpaper)
+        compose.onNodeWithContentDescription("Wallpaper colors").assertIsOn()
+        compose.onNodeWithText("Perfectly yours.").assertExists()
     }
     @Test fun lightThemeRenders() {
         compose.setContent { NotchTheme("light") { NotchApp() } }
@@ -135,7 +174,7 @@ class UiTest {
         }
     }
     /** Settings is a lazy list: items off screen are not composed until the list scrolls to them. */
-    private fun scrollTo(description: String) = compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasContentDescription(description))
+    private fun scrollTo(description: String, substring: Boolean = false) = compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasContentDescription(description, substring = substring))
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val file = File("build/screenshots/$name.png"); file.parentFile!!.mkdirs()

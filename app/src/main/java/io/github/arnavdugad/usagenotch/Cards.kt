@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +31,7 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import androidx.compose.animation.core.Animatable
 
 /** A provider's brand mark: Claude and Gemini in their own colours, OpenAI and Cursor in the theme ink. */
 @Composable fun Logo(id: String, modifier: Modifier = Modifier) {
@@ -44,47 +46,94 @@ import androidx.compose.ui.unit.*
 }
 
 /**
- * The desktop dock ring, animated: sweeps in like the desktop's 460 ms ease-out and follows new readings.
- * Outer ring: the session window. Inner ring: the weekly window. Logo in the centre.
+ * Numbers that roll digit by digit when they change: each changed digit slides up when the value grows and down when
+ * it shrinks. Positions are matched from the right, so "9%" to "10%" rolls the units and slides in the tens.
  */
-@Composable fun UsageRing(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, size: Dp = 58.dp) {
-    val t = LocalTokens.current; val context = LocalContext.current
-    var entered by remember { mutableStateOf(false) }; LaunchedEffect(Unit) { entered = true }
-    val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
-    val spec = tween<Float>(if (reduced) 0 else 460, easing = CubicBezierEasing(0.33f, 1f, 0.68f, 1f))
-    val primary by animateFloatAsState(if (entered) (s?.takeUnless { it.resetPassed(now) }?.shown(remaining)?.toFloat() ?: 0f) else 0f, spec, label = "Ring")
-    val secondary by animateFloatAsState(if (entered) (w?.shown(remaining)?.toFloat() ?: 0f) else 0f, spec, label = "Inner ring")
-    val track = t.track.toArgb(); val ink = t.ink.toArgb()
-    val logo = remember(p.id, ink) { Logos.drawable(context, p.id, ink) }
-    Canvas(Modifier.size(size)) {
-        drawIntoCanvas { canvas ->
-            RingPainter.draw(canvas.nativeCanvas, this.size.width / 2, this.size.height / 2, this.size.minDimension, density,
-                RingPainter.specFor(p, remaining, now, track, logo, if (s != null) primary else null, if (w != null) secondary else null))
+@Composable fun RollingText(text: String, fontSize: TextUnit, color: Color, weight: FontWeight = FontWeight.Normal, reduced: Boolean = false, modifier: Modifier = Modifier) {
+    var previous by remember { mutableStateOf(text) }
+    val grew = remember(text) { (text.filter { it.isDigit() }.toIntOrNull() ?: 0) >= (previous.filter { it.isDigit() }.toIntOrNull() ?: 0) }
+    SideEffect { previous = text }
+    // Read as one value ("78%"), not digit by digit.
+    Row(modifier.clearAndSetSemantics { contentDescription = text }) {
+        text.forEachIndexed { index, char ->
+            key(text.length - index) {
+                AnimatedContent(char, transitionSpec = {
+                    if (reduced) (fadeIn(snap()) togetherWith fadeOut(snap())) else {
+                        val dir = if (grew) 1 else -1
+                        (slideInVertically(spring(dampingRatio = .8f, stiffness = 420f)) { it * dir } + fadeIn(tween(140))) togetherWith
+                            (slideOutVertically(tween(160)) { -it * dir } + fadeOut(tween(120))) using SizeTransform(clip = true)
+                    }
+                }, label = "Digit") { c -> Text(c.toString(), fontSize = fontSize, color = color, fontWeight = weight) }
+            }
         }
     }
 }
 
+/** Set while an expanded provider view can morph from a dock ring; see MainActivity. */
+val LocalRingShare = staticCompositionLocalOf<(@Composable (String) -> Modifier)?> { null }
+
+/**
+ * The desktop dock ring, animated: sweeps in like the desktop's 460 ms ease-out, then springs to each new reading with a
+ * bright head ("liquid" fill). Above 90% used it breathes with a soft glow, as the desktop does.
+ * Outer ring: the session window. Inner ring: the weekly window. Logo in the centre.
+ */
+@Composable fun UsageRing(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, size: Dp = 58.dp, modifier: Modifier = Modifier) {
+    val t = LocalTokens.current; val context = LocalContext.current
+    val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
+    val target = s?.takeUnless { it.resetPassed(now) }?.shown(remaining)?.toFloat() ?: 0f
+    val innerTarget = w?.shown(remaining)?.toFloat() ?: 0f
+    val primary = remember { Animatable(0f) }; val inner = remember { Animatable(0f) }
+    var sweeping by remember { mutableStateOf(false) }
+    LaunchedEffect(target, reduced) {
+        if (reduced) { primary.snapTo(target); return@LaunchedEffect }
+        sweeping = true
+        if (primary.value == 0f && target > 0f) primary.animateTo(target, tween(460, easing = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)))
+        else primary.animateTo(target, spring(dampingRatio = .5f, stiffness = 140f))
+        sweeping = false
+    }
+    LaunchedEffect(innerTarget, reduced) { if (reduced) inner.snapTo(innerTarget) else inner.animateTo(innerTarget, spring(dampingRatio = .6f, stiffness = 120f)) }
+    val hot = s != null && !s.resetPassed(now) && s.used >= .9 && !reduced
+    val glow = if (hot) rememberInfiniteTransition(label = "Glow").animateFloat(.25f, 1f, infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "Breath").value else 0f
+    val track = t.track.toArgb(); val ink = t.ink.toArgb()
+    val logo = remember(p.id, ink) { Logos.drawable(context, p.id, ink) }
+    Canvas(modifier.size(size)) {
+        drawIntoCanvas { canvas ->
+            RingPainter.draw(canvas.nativeCanvas, this.size.width / 2, this.size.height / 2, this.size.minDimension, density,
+                RingPainter.specFor(p, remaining, now, track, logo, if (s != null) primary.value.coerceIn(0f, 1f) else null, if (w != null) inner.value.coerceIn(0f, 1f) else null,
+                    glow = glow, head = sweeping && !reduced))
+        }
+    }
+}
+
+internal fun headlineOf(p: Provider, remaining: Boolean, now: Long): String {
+    val s = p.sessionWindow()
+    return when { s == null -> when (p.status) { "NeedsAuth" -> "Sign in"; "Error" -> "Error"; else -> "—" }; s.resetPassed(now) -> "Renewed"; else -> "${s.percent(remaining)}%" }
+}
+internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
+    val s = p.sessionWindow()
+    return p.weeklyWindow()?.takeIf { it.id != s?.id }?.let { p.secondaryTag() + " " + if (it.resetPassed(now)) "new" else "${it.percent(remaining)}%" }
+}
+
 /** One dock cell: ring, the headline percentage and the desktop's "7d 98%" figure. */
-@Composable fun DockCell(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, selected: Boolean, onClick: () -> Unit) {
+@Composable fun DockCell(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, selected: Boolean, compact: Boolean = false, onClick: () -> Unit) {
     val t = LocalTokens.current; val haptics = LocalHapticFeedback.current
     val source = remember { MutableInteractionSource() }; val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed && !reduced) .94f else 1f, spring(dampingRatio = .55f, stiffness = 600f), label = "Press")
     val s = p.sessionWindow()
-    val headline = when { s == null -> when (p.status) { "NeedsAuth" -> "Sign in"; "Error" -> "Error"; else -> "—" }; s.resetPassed(now) -> "Renewed"; else -> "${s.percent(remaining)}%" }
-    val second = p.weeklyWindow()?.takeIf { it.id != s?.id }?.let { p.secondaryTag() + " " + if (it.resetPassed(now)) "new" else "${it.percent(remaining)}%" }
+    val headline = headlineOf(p, remaining, now)
+    val second = secondaryOf(p, remaining, now)
+    val share = LocalRingShare.current
     Column(
         Modifier.scale(scale).clip(RoundedCornerShape(20.dp)).background(if (selected) t.raised else Color.Transparent)
-            .clickable(source, null, role = Role.Tab) { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() }
-            .semantics(mergeDescendants = true) { contentDescription = "${p.name}, $headline${if (remaining && s != null && !s.resetPassed(now)) " left" else ""}" + (second?.let { ", $it" } ?: ""); this.selected = selected }
-            .padding(horizontal = 10.dp, vertical = 10.dp).widthIn(min = 64.dp),
+            .clickable(source, null, role = Role.Button) { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() }
+            .semantics(mergeDescendants = true) { contentDescription = "${p.name}, $headline${if (remaining && s != null && !s.resetPassed(now)) " left" else ""}" + (second?.let { ", $it" } ?: "") + ". Open details"; this.selected = selected }
+            .padding(horizontal = if (compact) 8.dp else 10.dp, vertical = if (compact) 6.dp else 10.dp).widthIn(min = if (compact) 52.dp else 64.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        UsageRing(p, remaining, now, reduced)
-        Spacer(Modifier.height(7.dp))
-        AnimatedContent(headline, transitionSpec = { (fadeIn(tween(180)) + slideInVertically { it / 3 }) togetherWith fadeOut(tween(120)) }, label = "Percent") { value ->
-            Text(value, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = t.text)
-        }
-        Text(second ?: p.name, fontSize = 11.sp, color = t.muted, maxLines = 1)
+        UsageRing(p, remaining, now, reduced, if (compact) 40.dp else 58.dp, share?.invoke(p.id) ?: Modifier)
+        Spacer(Modifier.height(if (compact) 3.dp else 7.dp))
+        RollingText(headline, if (compact) 12.sp else 15.sp, t.text, FontWeight.SemiBold, reduced)
+        if (!compact) Text(second ?: p.name, fontSize = 11.sp, color = t.muted, maxLines = 1)
     }
 }
 
@@ -97,11 +146,11 @@ import androidx.compose.ui.unit.*
 }
 
 /** A provider card laid out like the desktop popup. */
-@Composable fun ProviderCard(p: Provider, now: Long, remaining: Boolean, clock24: Boolean, reduced: Boolean, offline: Boolean, preview: Boolean, onRefresh: (() -> Unit)?, onDashboard: (String) -> Unit, modifier: Modifier = Modifier) {
+@Composable fun ProviderCard(p: Provider, now: Long, remaining: Boolean, clock24: Boolean, reduced: Boolean, offline: Boolean, preview: Boolean, onRefresh: (() -> Unit)?, onDashboard: (String) -> Unit, modifier: Modifier = Modifier, onOpen: (() -> Unit)? = null) {
     val t = LocalTokens.current
     var inspecting by rememberSaveable(p.id) { mutableStateOf(false) }
     Panel(modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.clip(RoundedCornerShape(12.dp)).then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open ${p.name} details") { onOpen() } else Modifier), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(t.raised), contentAlignment = Alignment.Center) { Logo(p.id, Modifier.size(19.dp)) }
             Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
                 Text(p.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = t.text)
@@ -110,6 +159,7 @@ import androidx.compose.ui.unit.*
                 p.account?.let { Text(it, fontSize = 11.sp, color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp)) }
             }
             StatusPill(if (preview) "Preview" else statusPill(p, now, offline))
+            if (onOpen != null) Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = t.faint, modifier = Modifier.padding(start = 4.dp).size(20.dp))
         }
         p.statusText?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = t.muted, modifier = Modifier.padding(top = 12.dp)) }
         Spacer(Modifier.height(12.dp))
@@ -173,7 +223,20 @@ import androidx.compose.ui.unit.*
             Text(if (renewed) "Awaiting new reading" else ClockText.resetsIn(w.reset, now), fontSize = 11.sp, color = t.faint)
         }
         Text(ClockText.resetsAt(w.reset, now, clock24), fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(top = 5.dp))
+        if (!renewed) forecastLine(w.forecast, now, clock24)?.let { line ->
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.AutoMirrored.Outlined.TrendingUp, null, tint = t.faint, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp))
+                Text(line, fontSize = 11.5.sp, color = t.muted)
+            }
+        }
     } }
+}
+
+/** The desktop's pace estimate in one line, or null while it is still learning or unavailable. */
+fun forecastLine(f: Forecast?, now: Long, clock24: Boolean): String? {
+    f ?: return null
+    f.limitAt?.let { return if (it <= now) "At this pace: limit reached by now" else "At this pace: limit around ${ClockText.time(it, clock24)}" }
+    return f.summary.takeIf { it.startsWith("Estimated") || it == "No increase observed" || it == "Reported limit reached" }?.let { if (it.startsWith("Estimated")) "At this pace: ${it.removePrefix("Estimated ")}" else it }
 }
 
 @Composable fun HistoryChart(window: UsageWindow) {
