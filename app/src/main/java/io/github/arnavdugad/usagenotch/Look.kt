@@ -24,11 +24,13 @@ import kotlin.math.sin
 
 /** Usage colours, identical to the desktop Palette so rings, bars and text agree on every device. */
 object Palette {
-    private val ramp = listOf(0.00 to 0xFF2EE0A8.toInt(), 0.42 to 0xFF66E062.toInt(), 0.60 to 0xFFF2D03C.toInt(), 0.78 to 0xFFFF9E2C.toInt(), 0.92 to 0xFFFF644E.toInt(), 1.00 to 0xFFFF3B30.toInt())
-    const val WARNING = 0xFFFFB547.toInt()
-    const val DANGER = 0xFFFF5F57.toInt()
-    const val LOADING = 0xFF8FB6FF.toInt()
-    const val UNKNOWN = 0xFF6E6E7A.toInt()
+    private val ramp = DesignTokens.usageRamp
+    const val WARNING = DesignTokens.WARNING
+    const val DANGER = DesignTokens.DANGER
+    const val LOADING = DesignTokens.LOADING
+    const val UNKNOWN = DesignTokens.UNKNOWN
+    const val LIVE = DesignTokens.LIVE
+    const val FORECAST = DesignTokens.FORECAST
     fun usage(used: Double): Int {
         val f = used.coerceIn(0.0, 1.0)
         for (i in 1 until ramp.size) {
@@ -69,10 +71,11 @@ data class Tokens(
     val dark: Boolean, val background: Color, val backgroundEnd: Color, val card: Color, val raised: Color, val hairline: Color,
     val text: Color, val muted: Color, val faint: Color, val accent: Color, val onAccent: Color, val track: Color, val ink: Color,
 )
-val DarkTokens = Tokens(true, Color(0xFF0A0C11), Color(0xFF10131B), Color(0xFF151922), Color(0xFF1E232D), Color(0x1FFFFFFF),
-    Color(0xFFF2F4F8), Color(0xFFA9B1BF), Color(0xFF7D8595), Color(0xFFACE8DA), Color(0xFF07231F), Color(0x26FFFFFF), Color(0xFFF4F6FA))
-val LightTokens = Tokens(false, Color(0xFFF2F4F8), Color(0xFFE9EDF4), Color(0xFFFFFFFF), Color(0xFFF1F3F6), Color(0x1A0B0D12),
-    Color(0xFF12151B), Color(0xFF5B6371), Color(0xFF858D9B), Color(0xFF1C7C6C), Color(0xFFFFFFFF), Color(0x1F0B0D12), Color(0xFF12151B))
+private fun c(argb: Int) = Color(argb)
+val DarkTokens = DesignTokens.Dark.let { d -> Tokens(true, c(d.background), c(d.backgroundEnd), c(d.card), c(d.raised), c(d.hairline),
+    c(d.text), c(d.muted), c(d.faint), c(d.accent), c(d.onAccent), c(d.track), c(d.ink)) }
+val LightTokens = DesignTokens.Light.let { l -> Tokens(false, c(l.background), c(l.backgroundEnd), c(l.card), c(l.raised), c(l.hairline),
+    c(l.text), c(l.muted), c(l.faint), c(l.accent), c(l.onAccent), c(l.track), c(l.ink)) }
 val LocalTokens = staticCompositionLocalOf { DarkTokens }
 
 /** Appearance preference: "system" follows Android, or a fixed "light"/"dark". */
@@ -121,14 +124,20 @@ object Logos {
  * charts and glass; rings keep the usage ramp so their colour always means how much is used.
  */
 object Accents {
-    private val brand = mapOf("claude" to 0xFFD97757.toInt(), "anthropic-api" to 0xFFD97757.toInt(), "codex" to 0xFF10A37F.toInt(), "openai-api" to 0xFF10A37F.toInt(),
-        "gemini" to 0xFF4796E3.toInt(), "cursor" to 0xFF9A7CFF.toInt())
-    val choices = listOf(0xFFD97757, 0xFFFF6B6B, 0xFFFFB547, 0xFF34C759, 0xFF10A37F, 0xFF32ADE6, 0xFF4796E3, 0xFF7A5CFF, 0xFFBF5AF2, 0xFFFF2D92).map { it.toInt() }
-    fun default(id: String) = brand[providerKind(id)] ?: 0xFF8E8E93.toInt()
-    fun of(prefs: android.content.SharedPreferences, id: String) = prefs.getInt("accent-${providerKind(id)}", default(id))
-    fun set(prefs: android.content.SharedPreferences, id: String, color: Int?) {
-        prefs.edit().apply { if (color == null) remove("accent-${providerKind(id)}") else putInt("accent-${providerKind(id)}", color) }.apply()
+    val choices = DesignTokens.accentChoices
+    fun default(id: String) = DesignTokens.brand[providerKind(id)] ?: DesignTokens.brand.getValue("other")
+    /** Extra accounts (`claude:work`) keep their own colour; others share their provider type's, as in 1.4. */
+    private fun prefKey(id: String) = "accent-" + if (':' in id) id else providerKind(id)
+    fun of(prefs: android.content.SharedPreferences, id: String) =
+        prefs.getInt(prefKey(id), if (':' in id) prefs.getInt("accent-${providerKind(id)}", default(id)) else default(id))
+    /** A colour chosen on this phone: saved and shared with the PC as `accent:<providerId>`. */
+    fun set(prefs: android.content.SharedPreferences, id: String, color: Int?) = SharedSettings.local(prefs, "accent:${syncId(id)}", color?.let { SharedSettings.hex(it) })
+    /** Writes the colour without recording a sync change; used when applying the PC's settings. */
+    internal fun store(prefs: android.content.SharedPreferences, id: String, color: Int?) {
+        prefs.edit().apply { if (color == null) remove(prefKey(id)) else putInt(prefKey(id), color) }.apply()
     }
+    /** The provider id the PC uses: API providers are written with underscores on Windows. */
+    fun syncId(id: String) = if (':' in id) id else when (providerKind(id)) { "openai-api" -> "openai_api"; "anthropic-api" -> "anthropic_api"; else -> providerKind(id) }
 }
 /** The accent for a provider id, supplied by the app so a change recolours everything at once. */
 val LocalAccent = staticCompositionLocalOf<(String) -> Color> { { Color(Accents.default(it)) } }
@@ -154,6 +163,8 @@ object RingPainter {
         /** Budget position on the arc (0..1, in the same terms as [shown]), or null. */
         val budget: Float? = null,
         val ink: Int = 0xFFFFFFFF.toInt(),
+        /** Budget position on the inner (weekly) ring, or null. */
+        val secondaryBudget: Float? = null,
     )
     fun draw(canvas: Canvas, cx: Float, cy: Float, size: Float, density: Float, spec: Spec) {
         if (size < 8f) return
@@ -199,6 +210,12 @@ object RingPainter {
             val innerStroke = max(1.3f * density, stroke * .62f)
             val innerRadius = radius - stroke - size * 0.05f
             ring(canvas, paint, cx, cy, innerRadius, innerStroke, spec.track, spec.secondaryShown, spec.secondaryUsed)
+            spec.secondaryBudget?.takeIf { it in 0f..1f }?.let { b ->
+                val a = Math.toRadians(-90.0 + b * 360.0)
+                val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeWidth = max(1f * density, innerStroke * .4f); color = spec.ink }
+                val r0 = innerRadius - innerStroke; val r1 = innerRadius + innerStroke
+                canvas.drawLine(cx + r0 * cos(a).toFloat(), cy + r0 * sin(a).toFloat(), cx + r1 * cos(a).toFloat(), cy + r1 * sin(a).toFloat(), tick)
+            }
         }
         if (spec.shown == null && spec.status in setOf("Error", "NeedsAuth", "Unsupported")) {
             // One restrained status mark, never an invented usage sweep.
@@ -236,11 +253,14 @@ object RingPainter {
     }
     /** Ring inputs for a provider, following the dock: outer ring the session window, inner ring the weekly one. */
     fun specFor(p: Provider, remaining: Boolean, now: Long, track: Int, logo: Drawable?, primary: Float? = null, secondary: Float? = null, glow: Float = 0f, head: Boolean = false,
-                ink: Int = 0xFFFFFFFF.toInt(), budget: Budget? = null, showTime: Boolean = true): Spec {
+                ink: Int = 0xFFFFFFFF.toInt(), budget: Budget? = null, showTime: Boolean = true, budgets: List<Budget> = emptyList()): Spec {
         val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
-        val budgetShown = budget?.takeIf { s != null && it.window == s.id }?.let { (if (remaining) 1f - it.limit / 100f else it.limit / 100f).coerceIn(0f, 1f) }
+        fun mark(b: Budget?) = b?.let { (if (remaining) 1f - it.limit / 100f else it.limit / 100f).coerceIn(0f, 1f) }
+        val sessionBudget = budget?.takeIf { s != null && it.window == s.id } ?: budgets.firstOrNull { s != null && it.provider == p.id && it.window == s.id }
+        val weeklyBudget = budgets.firstOrNull { w != null && it.provider == p.id && it.window == w.id }
         return Spec(primary ?: s?.shown(remaining)?.toFloat(), s?.used, w?.let { secondary ?: it.shown(remaining).toFloat() }, w?.used,
             p.status, s?.resetPassed(now) == true, track, logo, glow = glow, head = head,
-            timeLeft = if (showTime) s?.timeLeft(now) else null, budget = budgetShown, ink = ink)
+            timeLeft = if (showTime) s?.timeLeft(now) else null, budget = mark(sessionBudget), ink = ink,
+            secondaryBudget = mark(weeklyBudget)?.takeIf { w?.resetPassed(now) != true })
     }
 }

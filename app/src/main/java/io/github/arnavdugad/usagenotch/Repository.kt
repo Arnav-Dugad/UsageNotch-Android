@@ -54,7 +54,13 @@ class Repository(val context: Context) {
     private val cache = context.getSharedPreferences("usage", Context.MODE_PRIVATE)
     private val vault = Vault(context)
     fun pairing() = runCatching { vault.load() }.getOrNull()
-    fun snapshot() = cache.getString("snapshot", null)?.let { runCatching { Snapshot.parse(it) }.getOrNull() }
+    /** The latest snapshot, with your synced dock names and provider order applied. */
+    fun snapshot() = rawSnapshot()?.let { SharedSettings.present(it, prefs) }
+    fun rawSnapshot() = cache.getString("snapshot", null)?.let { runCatching { Snapshot.parse(it) }.getOrNull() }
+    /** "throttled" right after a refresh the PC answered with its latest reading instead of a new one; empty otherwise. */
+    fun refreshNote(): String = cache.getString("refreshNote", "")?.takeIf { cache.getLong("refreshNoteAt", 0) > System.currentTimeMillis() - 8_000 } ?: ""
+    /** Local settings changes that wait for the PC (it syncs them over Wi-Fi only). */
+    fun pendingSettings() = SharedSettings.pending(prefs).size
     /** When this phone last received usage data, from either path. */
     fun lastSync() = cache.getLong("sync", 0)
     /** When this phone last tried to reach the PC or internet sync. */
@@ -75,22 +81,36 @@ class Repository(val context: Context) {
         val (response, source) = lan.getOrNull()?.let { it to "lan" }
             ?: pair.relay?.let { relay -> runCatching { fetchRelay(relay) }.getOrNull()?.let { it to "internet" } }
             ?: throw lan.exceptionOrNull() ?: IOException("PC unreachable")
-        Snapshot.parse(response)
+        val parsed = Snapshot.parse(response)
         val adopted = Snapshot.relayUpdate(response)?.let { (state, relay) -> pair.copy(relay = if (state == "on") relay else null) } ?: pair
         vault.save(adopted)
         val now = System.currentTimeMillis()
         check(cache.edit().clear().putString("snapshot", response).putLong("sync", now).putLong("checked", now).putString("source", source).commit())
+        // Pairing with a PC that syncs settings: bring this phone's earlier budgets and colours along, then take the PC's.
+        if (parsed.has("settings")) SharedSettings.seed(prefs)
+        SharedSettings.merge(prefs, parsed.shared)
+        if (source == "lan" && parsed.has("settings")) runCatching { pushSettings(adopted) }
     } }
     suspend fun disconnect() = withContext(Dispatchers.IO) { lock.withLock { vault.clear(); cache.edit().clear().commit() } }
-    suspend fun refresh(): Boolean = withContext(Dispatchers.IO) { lock.withLock {
+    /**
+     * Fetches new readings: over the pinned local link first, then internet sync. [explicit] is a refresh you asked for
+     * (pull to refresh, the refresh button or a widget's refresh): when the PC offers it, the PC then reads your providers
+     * again (POST /v1/refresh) instead of sending its last reading.
+     */
+    suspend fun refresh(explicit: Boolean = false): Boolean = withContext(Dispatchers.IO) { lock.withLock {
         val pair = pairing() ?: return@withLock false
         val now = System.currentTimeMillis()
-        if (now - cache.getLong("attempt", 0) in 0..14_999) return@withLock true
+        if (now - cache.getLong("attempt", 0) in 0..(if (explicit) 2_999 else 14_999)) return@withLock true
         cache.edit().putLong("attempt", now).apply()
+        val askPc = explicit && rawSnapshot()?.has("refresh") == true
         val lanProblem = try {
-            val raw = fetch(pair); Snapshot.parse(raw)
-            adoptRelay(pair, raw)
-            return@withLock accept(raw, Source.Lan, now)
+            val result = fetchResult(pair, askPc); val parsed = Snapshot.parse(result.body)
+            adoptRelay(pair, result.body)
+            cache.edit().putString("refreshNote", if (askPc && result.refresh == "throttled") "throttled" else "").putLong("refreshNoteAt", now).apply()
+            val accepted = accept(result.body, Source.Lan, now)
+            SharedSettings.merge(prefs, parsed.shared)
+            if (parsed.has("settings")) { SharedSettings.seed(prefs); runCatching { pushSettings(pairing() ?: pair) } }
+            return@withLock accepted
         } catch (_: CertificateException) { "PC identity changed. Export a new pairing file from UsageNotch Link." }
         catch (e: javax.net.ssl.SSLException) {
             // The pinned trust manager's rejection normally arrives wrapped in a handshake failure.
@@ -105,7 +125,8 @@ class Repository(val context: Context) {
                 val raw = fetchRelay(relay); val snapshot = Snapshot.parse(raw)
                 val newest = snapshot()?.newestReading() ?: 0L
                 // A cached copy can lag behind a reading already received over Wi-Fi; never step backwards.
-                if (snapshot.newestReading() >= newest) return@withLock accept(raw, Source.Internet, now)
+                // Internet sync is read-only for settings: the PC's choices arrive, the phone's wait for Wi-Fi.
+                if (snapshot.newestReading() >= newest) return@withLock accept(raw, Source.Internet, now).also { SharedSettings.merge(prefs, snapshot.shared) }
                 cache.edit().putLong("checked", now).putBoolean("offline", false).putString("error", lanProblem ?: "").apply()
                 return@withLock true
             } catch (_: AEADBadTagException) { return@withLock fail("Internet sync key changed on your PC. Export a new pairing file from UsageNotch Link.", now) }
@@ -124,6 +145,18 @@ class Repository(val context: Context) {
         val wanted = if (state == "on") relay else null
         if (wanted != pair.relay) runCatching { vault.save(pair.copy(relay = wanted)) }
     }
+    /** Pushes settings changed on this phone to the PC, then takes its merged copy. Local link only. */
+    private fun pushSettings(pair: Pairing) {
+        val body = SharedSettings.payload(prefs) ?: return
+        val response = putSettings(pair, body)
+        SharedSettings.merge(prefs, SharedSettings.parseEntries(JSONObject(response).getJSONObject("shared")))
+    }
+    /** Sends pending settings right after you change one, when the PC is on this network. Quietly waits otherwise. */
+    suspend fun syncSettings(): Boolean = withContext(Dispatchers.IO) { lock.withLock {
+        val pair = pairing() ?: return@withLock false
+        if (rawSnapshot()?.has("settings") != true || SharedSettings.pending(prefs).isEmpty()) return@withLock false
+        runCatching { pushSettings(pair) }.isSuccess
+    } }
     private fun accept(raw: String, source: Source, now: Long): Boolean {
         check(cache.edit().putString("snapshot", raw).putLong("sync", now).putLong("checked", now).putString("source", if (source == Source.Internet) "internet" else "lan").putBoolean("offline", false).putString("error", "").commit())
         return true
@@ -141,25 +174,46 @@ internal fun pinnedTrustManager(pin: String) = object : X509TrustManager {
         chain[0].checkValidity()
     }
 }
-internal fun fetch(pair: Pairing): String {
+internal fun fetch(pair: Pairing): String = fetchResult(pair, false).body
+internal class LinkResult(val body: String, val refresh: String?)
+/** GET /v1/snapshot, or POST /v1/refresh when [refresh] is set; both answer with a snapshot. An older PC without the route gets a GET. */
+internal fun fetchResult(pair: Pairing, refresh: Boolean): LinkResult =
+    if (!refresh) linkRequest(pair, "/v1/snapshot", "GET", null, 10_000)
+    else try { linkRequest(pair, "/v1/refresh", "POST", null, 32_000) } catch (_: MissingRoute) { linkRequest(pair, "/v1/snapshot", "GET", null, 10_000) }
+/** PUT /v1/settings with this phone's pending settings; returns the PC's merged map. */
+internal fun putSettings(pair: Pairing, body: String): String = linkRequest(pair, "/v1/settings", "PUT", body, 10_000).body
+private class MissingRoute : IOException("Route not offered by this PC")
+private fun linkRequest(pair: Pairing, path: String, method: String, body: String?, readTimeout: Int): LinkResult {
     val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(pinnedTrustManager(pair.certificateSha256)), SecureRandom()) }
-    val connection = URL(pair.endpoint + "/v1/snapshot").openConnection() as HttpsURLConnection
+    val connection = URL(pair.endpoint + path).openConnection() as HttpsURLConnection
     try {
         connection.sslSocketFactory = ssl.socketFactory
         // Identity is the exact out-of-band paired certificate, not a public DNS name.
         connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, session ->
             runCatching { certificatePin(session.peerCertificates[0] as X509Certificate) == pair.certificateSha256 }.getOrDefault(false)
         }
-        connection.instanceFollowRedirects = false; connection.connectTimeout = 5_000; connection.readTimeout = 10_000
+        connection.instanceFollowRedirects = false; connection.connectTimeout = 5_000; connection.readTimeout = readTimeout
+        connection.requestMethod = method
         connection.setRequestProperty("Authorization", "Bearer " + pair.token)
         connection.setRequestProperty("Accept", "application/json")
+        // Protocol 2: the PC adds the heavier fields (7-day trend, insights) only for phones that ask.
+        connection.setRequestProperty("X-UsageNotch-Protocol", "2")
+        connection.setRequestProperty("X-UsageNotch-Features", Snapshot.FEATURES)
+        if (method != "GET") {
+            val bytes = (body ?: "").toByteArray(Charsets.UTF_8); require(bytes.size <= 32_768) { "Settings too large" }
+            connection.doOutput = true; connection.setFixedLengthStreamingMode(bytes.size)
+            if (body != null) connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(bytes) }
+        }
         when (connection.responseCode) {
             200 -> Unit
             401 -> throw BridgeException("Pairing was revoked on your PC. Import a new pairing file.")
             503 -> throw BridgeException("Open UsageNotch on your PC and let it collect a reading.")
+            404, 405 -> if (path != "/v1/snapshot") throw MissingRoute() else throw BridgeException("PC could not supply usage. Try refreshing shortly.")
             else -> throw BridgeException("PC could not supply usage. Try refreshing shortly.")
         }
-        return connection.inputStream.use { stream -> String(readBounded(stream, 1_048_576), Charsets.UTF_8) }
+        val text = connection.inputStream.use { stream -> String(readBounded(stream, 2_097_152), Charsets.UTF_8) }
+        return LinkResult(text, connection.getHeaderField("X-UsageNotch-Refresh"))
     } finally { connection.disconnect() }
 }
 /** Downloads the encrypted snapshot from the owner's secret gist. GitHub only ever sees ciphertext. */

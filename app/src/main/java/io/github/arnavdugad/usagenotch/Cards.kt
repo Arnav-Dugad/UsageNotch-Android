@@ -82,7 +82,7 @@ val LocalRingShare = staticCompositionLocalOf<(@Composable (String) -> Modifier)
  * bright head. Above 90% used it breathes with a soft glow. When a limit renews while you watch, particles burst from it.
  * Outer ring: the session window, with a hairline for the time left before it resets. Inner ring: the weekly window.
  */
-@Composable fun UsageRing(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, size: Dp = 58.dp, modifier: Modifier = Modifier, budget: Budget? = null) {
+@Composable fun UsageRing(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, size: Dp = 58.dp, modifier: Modifier = Modifier, budget: Budget? = null, budgets: List<Budget> = emptyList()) {
     val t = LocalTokens.current; val context = LocalContext.current; val haptics = LocalHapticFeedback.current
     val accent = LocalAccent.current(p.id)
     val s = p.sessionWindow(); val w = p.weeklyWindow()?.takeIf { it.id != s?.id }
@@ -114,7 +114,7 @@ val LocalRingShare = staticCompositionLocalOf<(@Composable (String) -> Modifier)
         drawIntoCanvas { canvas ->
             RingPainter.draw(canvas.nativeCanvas, this.size.width / 2, this.size.height / 2, this.size.minDimension, density,
                 RingPainter.specFor(p, remaining, now, track, logo, if (s != null) primary.value.coerceIn(0f, 1f) else null, if (w != null) inner.value.coerceIn(0f, 1f) else null,
-                    glow = glow, head = sweeping && !reduced, ink = ink, budget = budget))
+                    glow = glow, head = sweeping && !reduced, ink = ink, budget = budget, budgets = budgets))
         }
         val progress = burst.value
         if (progress < 1f) {
@@ -144,7 +144,7 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
 }
 
 /** One dock cell: ring, the headline percentage and the desktop's "7d 98%" figure. */
-@Composable fun DockCell(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, selected: Boolean, compact: Boolean = false, budget: Budget? = null, onClick: () -> Unit) {
+@Composable fun DockCell(p: Provider, remaining: Boolean, now: Long, reduced: Boolean, selected: Boolean, compact: Boolean = false, budget: Budget? = null, budgets: List<Budget> = emptyList(), onClick: () -> Unit) {
     val t = LocalTokens.current; val haptics = LocalHapticFeedback.current
     val source = remember { MutableInteractionSource() }; val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed && !reduced) .92f else 1f, spring(dampingRatio = .5f, stiffness = 600f), label = "Press")
@@ -159,7 +159,7 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
             .padding(horizontal = if (compact) 6.dp else 8.dp, vertical = if (compact) 4.dp else 8.dp).widthIn(min = if (compact) 48.dp else 70.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        UsageRing(p, remaining, now, reduced, if (compact) 40.dp else 64.dp, share?.invoke(p.id) ?: Modifier, budget)
+        UsageRing(p, remaining, now, reduced, if (compact) 40.dp else 64.dp, share?.invoke(p.id) ?: Modifier, budget, budgets)
         Spacer(Modifier.height(if (compact) 3.dp else 8.dp))
         RollingText(headline, if (compact) 12.sp else 16.sp, t.text, FontWeight.SemiBold, reduced)
         if (!compact) Text(second ?: p.name, fontSize = 11.sp, color = t.muted, maxLines = 1)
@@ -191,7 +191,7 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
         }
         p.statusText?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = t.muted, modifier = Modifier.padding(top = 10.dp)) }
         if (p.windows.isNotEmpty() || p.extras.isNotEmpty()) Spacer(Modifier.height(12.dp))
-        p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }); if (index < p.windows.lastIndex || p.extras.isNotEmpty()) Spacer(Modifier.height(8.dp)) }
+        p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }, offline && !preview); if (index < p.windows.lastIndex || p.extras.isNotEmpty()) Spacer(Modifier.height(8.dp)) }
         p.extras.forEachIndexed { index, e ->
             Panel(Modifier.fillMaxWidth(), 18.dp, innerSurface()) { Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(e.label, fontSize = 13.5.sp, color = t.text, modifier = Modifier.weight(1f))
@@ -203,7 +203,7 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
 }
 
 /** One limit: label and percentage, a colour-graded bar with the budget tick, then the reset and the pace. */
-@Composable fun WindowRow(w: UsageWindow, index: Int, now: Long, remaining: Boolean, clock24: Boolean, reduced: Boolean, budget: Budget? = null) {
+@Composable fun WindowRow(w: UsageWindow, index: Int, now: Long, remaining: Boolean, clock24: Boolean, reduced: Boolean, budget: Budget? = null, offline: Boolean = false) {
     val t = LocalTokens.current
     val renewed = w.resetPassed(now)
     val ramp = Color(Palette.usage(w.used))
@@ -212,6 +212,10 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
     var entered by remember { mutableStateOf(false) }; LaunchedEffect(Unit) { entered = true }
     val fill by animateFloatAsState(if (entered && !renewed) w.shown(remaining).toFloat() else 0f, if (reduced) snap() else spring(dampingRatio = .75f, stiffness = 90f, visibilityThreshold = .001f), label = "Bar")
     val budgetShown = budget?.let { (if (remaining) 1f - it.limit / 100f else it.limit / 100f).coerceIn(0f, 1f) }
+    // While the PC is off or the reading is old: a dashed stretch of bar to where usage probably is now.
+    val estimate = w.estimateNow(now, offline)
+    val estimateShown = estimate?.let { (if (remaining) 1 - it else it).toFloat().coerceIn(0f, 1f) }
+    val dash = remember { PathEffect.dashPathEffect(floatArrayOf(6f, 6f)) }
     Panel(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, 18.dp, innerSurface()) { Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(w.label, fontSize = 13.5.sp, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
@@ -221,9 +225,15 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
             val r = size.height / 2
             drawRoundRect(t.track, cornerRadius = androidx.compose.ui.geometry.CornerRadius(r))
             if (fill > 0f) drawRoundRect(Brush.horizontalGradient(listOf(ramp.copy(alpha = .55f), ramp), endX = size.width * fill), size = size.copy(width = (size.width * fill).coerceAtLeast(size.height)), cornerRadius = androidx.compose.ui.geometry.CornerRadius(r))
+            estimateShown?.takeIf { !renewed && fill > 0f }?.let { e ->
+                // Remaining shrinks as usage grows, so the estimate extends toward the start in remaining mode.
+                val from = size.width * fill; val to = size.width * e
+                drawLine(ramp.copy(alpha = .75f), Offset(from, size.height / 2), Offset(to, size.height / 2), size.height * .7f, StrokeCap.Round, dash)
+            }
             budgetShown?.takeIf { !renewed }?.let { b -> val x = size.width * b; drawLine(t.ink, Offset(x, -3.dp.toPx()), Offset(x, size.height + 3.dp.toPx()), 2.dp.toPx(), StrokeCap.Round) }
         }
         Text(if (renewed) "Awaiting a new reading" else if (w.reset == null) "Reset time not reported" else ClockText.resetsAt(w.reset, now, clock24) + " · " + ClockText.countdown(w.reset, now), fontSize = 11.5.sp, color = t.muted)
+        if (!renewed && estimate != null) EstimateLine(estimate, remaining, Modifier.padding(top = 4.dp))
         if (!renewed) {
             budget?.let { Budgets.status(it, w, now, clock24) }?.let { st ->
                 val color = when (st.state) { Budgets.State.Over -> Color(Palette.DANGER); Budgets.State.Pace, Budgets.State.Near -> Color(Palette.WARNING); else -> t.muted }
@@ -258,6 +268,25 @@ fun forecastLine(f: Forecast?, now: Long, clock24: Boolean): String? {
         if (action != null || secondary != null) Row(Modifier.padding(start = 5.dp)) { if (action != null) TextButton(onClick = clicked) { Text(action, color = t.accent) }; if (secondary != null) TextButton(onClick = secondaryClicked) { Text(secondary, color = t.muted) } }
     } }
 }
+/** "≈ 46% used now · estimate": where usage probably is while the PC is away. Never presented as a reading. */
+@Composable fun EstimateLine(estimate: Double, remaining: Boolean, modifier: Modifier = Modifier) {
+    val t = LocalTokens.current
+    val value = ((if (remaining) 1 - estimate else estimate) * 100).toInt()
+    Row(modifier.semantics(mergeDescendants = true) { contentDescription = "Estimated $value percent ${if (remaining) "left" else "used"} now, from your recent pace" }, verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.AutoGraph, null, tint = Color(Palette.FORECAST), modifier = Modifier.size(14.dp)); Spacer(Modifier.width(5.dp))
+        Text("≈ $value% ${if (remaining) "left" else "used"} now", fontSize = 11.5.sp, color = Color(Palette.readable(Palette.FORECAST, if (t.dark) 0xFF1B2029.toInt() else 0xFFF3F5F8.toInt())), fontWeight = FontWeight.SemiBold)
+        Text(" · estimate from your pace", fontSize = 11.5.sp, color = t.faint)
+    }
+}
+
+/** A provider status-page incident from the PC. Tap to read it on the status page. */
+@Composable fun IncidentBanner(incident: Incident, providerName: String?, openUrl: (String) -> Unit) {
+    val tone = Color(when (incident.impact) { "critical", "major" -> Palette.DANGER; "maintenance" -> Palette.LOADING; else -> Palette.WARNING })
+    val status = incident.status.replaceFirstChar { it.uppercase() }.ifBlank { null }
+    Notice((providerName?.let { "$it · " } ?: "") + incident.title, listOfNotNull(status, if (incident.impact == "maintenance") "Scheduled maintenance" else "${incident.impact.replaceFirstChar { it.uppercase() }} impact").joinToString(" · "),
+        action = incident.url?.let { "Status page" }, clicked = { incident.url?.let(openUrl) }, tone = tone)
+}
+
 @Composable fun SectionLabel(text: String) { Text(text, fontSize = 12.sp, letterSpacing = .4.sp, color = LocalTokens.current.muted, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 18.dp, top = 8.dp)) }
 
 /** An iOS-style settings row: title, an optional short hint, and a switch. The whole row is the touch target. */

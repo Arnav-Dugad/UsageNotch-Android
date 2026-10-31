@@ -49,10 +49,15 @@ data class DayKey(val provider: String, val window: String, val date: String, va
     companion object { fun decode(value: String?) = value?.split("|")?.takeIf { it.size == 4 }?.let { DayKey(it[0], it[1], it[2], it[3]) } }
 }
 
-/** History tab: daily usage, a 90-day calendar, providers side by side, and your busiest hours, all recorded on the PC. */
-fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, clock24: Boolean, reduced: Boolean, openDay: DayKey?, onDay: (DayKey) -> Unit) {
+/**
+ * History tab: daily usage, a 90-day calendar, providers side by side and your busiest hours, then (from UsageNotch for
+ * Windows 2.6) tokens by project and model, unused capacity, limits reached, reset reliability, work sessions and events.
+ * Everything is recorded on the PC; sections it doesn't send are left out.
+ */
+fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, clock24: Boolean, reduced: Boolean, openDay: DayKey?, onDay: (DayKey) -> Unit, tokens: TokenUsage? = null) {
     val withHistory = providers.filter { it.history.isNotEmpty() }
     if (withHistory.isEmpty()) {
+        tokens?.let { usage -> item(key = "h-tokens") { TokensCard(usage, reduced) } }
         item(key = "h-empty") {
             Notice(if (providers.isEmpty()) "No history yet" else "History comes from your PC",
                 if (providers.isEmpty()) null else "Update UsageNotch on Windows to 2.4 or later.", tone = LocalTokens.current.muted)
@@ -67,6 +72,12 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
     item(key = "h-calendar") { CalendarCard(provider, history, openDay, onDay) }
     if (withHistory.size > 1) item(key = "h-compare") { CompareCard(withHistory, state.days, reduced) }
     item(key = "h-heat") { Heatmap(provider, history, clock24) }
+    tokens?.let { usage -> item(key = "h-tokens") { TokensCard(usage, reduced) } }
+    if (history.unused.isNotEmpty()) item(key = "h-unused-${history.window}") { UnusedCard(provider, history, reduced) }
+    if (history.hits.isNotEmpty() || history.reliability != null) item(key = "h-hits-${history.window}") { HitsCard(history, clock24) }
+    if (history.reliability != null) item(key = "h-reliability-${history.window}") { ReliabilityCard(history) }
+    if (history.sessions.isNotEmpty()) item(key = "h-sessions-${history.window}") { SessionsCard(history, clock24) }
+    if (history.events.isNotEmpty()) item(key = "h-events-${history.window}") { EventsCard(history, clock24) }
 }
 
 @Stable class HistoryState(provider: String?, window: String?, days: Int) {

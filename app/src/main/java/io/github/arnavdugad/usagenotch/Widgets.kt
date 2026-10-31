@@ -89,7 +89,8 @@ open class UsageWidget : AppWidgetProvider() {
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             val started = System.currentTimeMillis()
             try {
-                val done = kotlinx.coroutines.withTimeoutOrNull(9_000) { runCatching { repo.refresh() }; true }
+                // A tap on the widget is a refresh you asked for: the PC reads your providers again when it can.
+                val done = kotlinx.coroutines.withTimeoutOrNull(9_000) { runCatching { repo.refresh(explicit = true) }; true }
                 if (done == null) requestRefresh(context)
                 // A fast Wi-Fi refresh would flash the spinner too briefly to notice.
                 kotlinx.coroutines.delay((700 - (System.currentTimeMillis() - started)).coerceAtLeast(0))
@@ -162,6 +163,14 @@ internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options
             setViewVisibility(R.id.widget_refresh, if (out.refresh && !refreshing) View.VISIBLE else View.GONE)
             setViewVisibility(R.id.widget_progress, if (out.refresh && refreshing) View.VISIBLE else View.GONE)
             setOnClickPendingIntent(R.id.widget_root, open); setOnClickPendingIntent(R.id.widget_image, open); setOnClickPendingIntent(R.id.widget_refresh, refresh)
+            // A live countdown the launcher ticks every second, with no wake-ups: Chronometer counts down to the reset.
+            val countdown = out.countdownAt
+            if (countdown != null) {
+                setViewVisibility(R.id.widget_countdown, View.VISIBLE)
+                setChronometer(R.id.widget_countdown, android.os.SystemClock.elapsedRealtime() + (countdown - System.currentTimeMillis()), (out.countdownLabel ?: "Renews in") + " %s", true)
+                setChronometerCountDown(R.id.widget_countdown, true)
+                setTextColor(R.id.widget_countdown, if (input.dark) 0xFFA9B1BF.toInt() else 0xFF5B6371.toInt())
+            } else setViewVisibility(R.id.widget_countdown, View.GONE)
         }
     }
     return if (Build.VERSION.SDK_INT >= 31 && sizes.size > 1) RemoteViews(sizes.associateWith { views(it) }) else views(sizes.first())

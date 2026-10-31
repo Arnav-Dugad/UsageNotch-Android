@@ -143,9 +143,9 @@ private fun fallbackSurface(t: Tokens, level: GlassLevel, tint: Color): Color {
         val start = System.nanoTime() - (phase * 1e9).toLong()
         while (isActive) { phase = ((System.nanoTime() - start) / 1e9).toFloat(); delay(66) }
     }
-    val palette = (colors + listOf(t.accent, Color(0xFF7A5CFF), Color(0xFF2E9BFF))).distinct().take(4)
+    val palette = (colors + listOf(t.accent) + DesignTokens.ambient.map { Color(it) }).distinct().take(4)
     Canvas(modifier.fillMaxSize()) {
-        drawRect(Brush.verticalGradient(if (t.dark) listOf(Color(0xFF06080C), Color(0xFF0C0F16)) else listOf(Color(0xFFF4F6FA), Color(0xFFE6EAF2))))
+        drawRect(Brush.verticalGradient(if (t.dark) listOf(Color(DesignTokens.Dark.ambientTop), Color(DesignTokens.Dark.ambientBottom)) else listOf(Color(DesignTokens.Light.ambientTop), Color(DesignTokens.Light.ambientBottom))))
         val w = size.width; val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
         palette.forEachIndexed { i, color ->
@@ -153,7 +153,7 @@ private fun fallbackSurface(t: Tokens, level: GlassLevel, tint: Color): Color {
             val cx = w * (.2f + .6f * ((i * .37f) % 1f)) + w * .16f * sin(phase * speed * 6.283f + i * 1.7f)
             val cy = h * (.12f + .22f * i) + h * .07f * cos(phase * speed * 5.1f + i * 2.3f)
             val radius = w * (.62f + .1f * ((i + 1) % 3))
-            val alpha = if (t.dark) .32f else .30f
+            val alpha = if (t.dark) DesignTokens.Dark.ambientAlpha else DesignTokens.Light.ambientAlpha
             drawCircle(Brush.radialGradient(listOf(color.copy(alpha = alpha), color.copy(alpha = alpha * .35f), Color.Transparent), Offset(cx, cy), radius), radius, Offset(cx, cy))
         }
     }

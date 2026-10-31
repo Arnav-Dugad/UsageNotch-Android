@@ -237,6 +237,56 @@ class UiTest {
             }
         }
     }
+    @Test fun protocolTwoScreensWithSampleData() {
+        compose.setContent { NotchTheme("dark") { NotchApp() } }
+        compose.onNodeWithText("Explore with sample data").performClick()
+        // A status-page incident and a second Codex account.
+        compose.onAllNodesWithText("Claude · Elevated errors on Claude Opus").onFirst().assertExists()
+        compose.onNodeWithContentDescription("Codex · Work", substring = true).assertExists()
+        screenshot("09-overview-v2")
+        compose.onNodeWithContentDescription("Claude, 73% left, 7d 59%. Open details").performClick()
+        compose.onNodeWithContentDescription("7 days").performScrollTo().performClick()
+        compose.onNodeWithText("Last 7 days").assertExists()
+        compose.onNodeWithContentDescription("usage over 7 days", substring = true).performScrollTo()
+        compose.onNodeWithText("Budget 60%").assertDoesNotExist()
+        screenshot("10-detail-explorer-7d")
+        // Budgets for any limit: pick the weekly one.
+        compose.onAllNodesWithText("All models").onFirst().performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Budget").performScrollTo().performClick()
+        compose.onNodeWithText("Stay under").assertExists()
+        screenshot("11-detail-weekly-budget")
+        compose.onNodeWithContentDescription("Back").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("History").performClick()
+        scrollToNode(hasText("Tokens")); compose.onNodeWithText("Tokens").assertExists()
+        screenshot("12-history-tokens")
+        scrollToNode(hasText("Unused capacity")); compose.onNodeWithText("Unused capacity").assertExists()
+        scrollToNode(hasText("Reset reliability")); compose.onNodeWithText("Reset reliability").assertExists()
+        screenshot("13-history-insights")
+        scrollToNode(hasText("Work sessions")); scrollToNode(hasText("Events")); compose.onNodeWithText("Events").assertExists()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        scrollTo("Before a limit renews"); compose.onNodeWithContentDescription("Before a limit renews").assertIsOff()
+        // Scroll past it so the floating tab bar doesn't cover the row.
+        scrollTo("Show remaining"); compose.onNodeWithContentDescription("Quiet hours").performClick()
+        compose.onNodeWithContentDescription("Quiet hours").assertIsOn()
+        scrollTo("Quiet hours start"); compose.onNodeWithContentDescription("Quiet hours start").assertExists()
+        screenshot("14-settings-quiet-hours")
+        // Provider order is a real setting, so sample data doesn't offer it.
+        compose.onNodeWithContentDescription("Move Claude up").assertDoesNotExist()
+    }
+    @Test fun fullWidgetsCountDownLive() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val now = System.currentTimeMillis()
+        val snapshot = Snapshot.parse(fixture(now, now + 7_200_000))
+        val input = WidgetRenderer.Input(snapshot, true, "PC sync just now", true, false, now, true, false, null, false)
+        val full = WidgetRenderer.render(context, WidgetRenderer.Frame(330f, 250f, 2f), input)
+        assertEquals(now + 7_200_000, full.countdownAt); assertEquals("Claude renews in", full.countdownLabel)
+        assertNull("no room on a dock row", WidgetRenderer.render(context, WidgetRenderer.Frame(330f, 96f, 2f), input).countdownAt)
+        context.getSharedPreferences("usage", 0).edit().putString("snapshot", fixture(now, now + 7_200_000)).putLong("sync", now).commit()
+        val options = android.os.Bundle().apply { putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 330); putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 250); putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 250); putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 330) }
+        val views = buildWidgetViews(context, 8, false, options).apply(context, android.widget.FrameLayout(context))
+        val clock = views.findViewById<android.widget.Chronometer>(R.id.widget_countdown)
+        assertEquals(android.view.View.VISIBLE, clock.visibility); assertTrue(clock.isCountDown)
+    }
     /** Settings is a lazy list: items off screen are not composed until the list scrolls to them. */
     private fun scrollTo(description: String, substring: Boolean = false) = scrollToNode(hasContentDescription(description, substring = substring))
     private fun scrollToNode(matcher: SemanticsMatcher) = compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(matcher)

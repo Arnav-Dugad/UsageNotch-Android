@@ -26,8 +26,12 @@ object WidgetRenderer {
         val now: Long, val dark: Boolean, val focus: Boolean, val focusId: String?, val offline: Boolean,
         val budgets: List<Budget> = emptyList(),
     )
-    /** [refresh] says whether this layout left the top-right corner free for the refresh button. */
-    class Output(val bitmap: Bitmap, val description: String, val full: Boolean, val refresh: Boolean = full)
+    /**
+     * [refresh] says whether this layout left the top-right corner free for the refresh button. [countdownAt] is the
+     * reset a live Chronometer counts down to along the bottom edge (left free for it), with [countdownLabel] before it.
+     */
+    class Output(val bitmap: Bitmap, val description: String, val full: Boolean, val refresh: Boolean = full,
+                 val countdownAt: Long? = null, val countdownLabel: String? = null)
 
     const val MAX_BITMAP_BYTES = 5_000_000
     /** Glass body colours, matching res/drawable/widget_background*.xml, for previews in the app. */
@@ -36,6 +40,8 @@ object WidgetRenderer {
     const val CORNER_DP = 24f
     /** The refresh button's corner, in dp, which layouts keep clear. */
     const val REFRESH_DP = 34f
+    /** The bottom strip a live countdown uses in full layouts. */
+    const val COUNTDOWN_DP = 20f
 
     private class Ink(dark: Boolean) {
         val text = if (dark) 0xFFF2F4F8.toInt() else 0xFF12151B.toInt()
@@ -64,15 +70,19 @@ object WidgetRenderer {
         glass(canvas, wDp, hDp, d, input.dark)
         // Small widgets open the app when tapped; from about 2×1 up, a refresh button sits in the top-right corner.
         val refresh = providers.isNotEmpty() && input.paired && (full || (wDp >= 130 && hDp >= 60) || (hDp >= 130 && wDp >= 60))
+        // A live countdown to the next session reset along the bottom of larger widgets; the launcher ticks it each second.
+        val next = if (full && hDp >= 190) providers.mapNotNull { p -> p.sessionWindow()?.takeIf { !it.resetPassed(input.now) && (it.reset ?: 0) > input.now }?.let { p to it } }.minByOrNull { it.second.reset!! } else null
+        val bodyH = if (next != null) hDp - COUNTDOWN_DP else hDp
         when {
             providers.isEmpty() -> empty(context, canvas, wDp, hDp, d, ink, input)
-            full && input.focus -> focusFull(context, canvas, wDp, hDp, d, ink, input, providers.first())
-            full -> overviewFull(context, canvas, wDp, hDp, d, ink, input, providers)
+            full && input.focus -> focusFull(context, canvas, wDp, bodyH, d, ink, input, providers.first())
+            full -> overviewFull(context, canvas, wDp, bodyH, d, ink, input, providers)
             refresh && wDp >= hDp -> dock(context, canvas, 0f, 0f, wDp - REFRESH_DP + 6, hDp, d, ink, input, providers, pad = if (min(wDp, hDp) < 110) 5f else 10f)
             refresh -> dock(context, canvas, 0f, REFRESH_DP - 6, wDp, hDp - REFRESH_DP + 6, d, ink, input, providers, pad = if (min(wDp, hDp) < 110) 5f else 10f)
             else -> dock(context, canvas, 0f, 0f, wDp, hDp, d, ink, input, providers, pad = if (min(wDp, hDp) < 110) 5f else 10f)
         }
-        return Output(bitmap, describe(input, providers), full, refresh)
+        return Output(bitmap, describe(input, providers), full, refresh, next?.second?.reset,
+            next?.let { (p, w) -> if (input.focus) "${w.label} renews in" else "${p.name} renews in" })
     }
 
     /** The glass's light: a soft sheen across the top and a specular rim, bright at the top-left and fading around. */
@@ -110,7 +120,7 @@ object WidgetRenderer {
     }
     private fun ring(context: Context, canvas: Canvas, p: Provider, cx: Float, cy: Float, size: Float, d: Float, ink: Ink, input: Input, dual: Boolean = true) {
         val budget = input.budgets.firstOrNull { it.provider == p.id && it.window == p.sessionWindow()?.id }
-        val spec = RingPainter.specFor(p, input.remaining, input.now, ink.track, Logos.drawable(context, p.id, ink.text), ink = ink.text, budget = budget)
+        val spec = RingPainter.specFor(p, input.remaining, input.now, ink.track, Logos.drawable(context, p.id, ink.text), ink = ink.text, budget = budget, budgets = input.budgets)
         RingPainter.draw(canvas, cx, cy, size, d, if (dual) spec else RingPainter.Spec(spec.shown, spec.used, null, null, spec.status, spec.renewed, spec.track, spec.logo, timeLeft = spec.timeLeft, budget = spec.budget, ink = spec.ink))
     }
 
@@ -170,7 +180,7 @@ object WidgetRenderer {
     }
 
     /** A desktop-style limit row: label and percentage, a colour-graded bar, and the local reset time. */
-    private fun row(canvas: Canvas, label: String, w: UsageWindow, x: Float, y: Float, width: Float, d: Float, ink: Ink, input: Input): Float {
+    private fun row(canvas: Canvas, label: String, w: UsageWindow, x: Float, y: Float, width: Float, d: Float, ink: Ink, input: Input, provider: String = ""): Float {
         val renewed = w.resetPassed(input.now)
         val value = if (renewed) "Renewed" else "${w.percent(input.remaining)}% ${if (input.remaining) "left" else "used"}"
         val vp = paint(12f, Palette.readable(Palette.usage(w.used), ink.surface), d, true)
@@ -181,7 +191,14 @@ object WidgetRenderer {
         canvas.drawRoundRect(RectF(x * d, (y + 18) * d, (x + width) * d, (y + 23) * d), 3 * d, 3 * d, bar)
         val shown = if (renewed) 0.0 else w.shown(input.remaining)
         if (shown > 0) { bar.color = Palette.usage(w.used); canvas.drawRoundRect(RectF(x * d, (y + 18) * d, (x + max(5f, (width * shown).toFloat())) * d, (y + 23) * d), 3 * d, 3 * d, bar) }
-        text(canvas, ClockText.resetsAt(w.reset, input.now, input.use24), x * d, (y + 36) * d, width * d, paint(10f, ink.faint, d))
+        // Your budget for this limit, as a tick across the bar.
+        input.budgets.firstOrNull { it.provider == provider && it.window == w.id }?.takeIf { !renewed }?.let { b ->
+            val at = x + width * (if (input.remaining) 1f - b.limit / 100f else b.limit / 100f).coerceIn(0f, 1f)
+            canvas.drawRoundRect(RectF((at - .9f) * d, (y + 16) * d, (at + .9f) * d, (y + 25) * d), 1 * d, 1 * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink.text })
+        }
+        // While the PC is off, an estimate of where usage probably is now, clearly marked as one.
+        val estimate = w.estimateNow(input.now, input.offline)?.let { e -> "≈ ${((if (input.remaining) 1 - e else e) * 100).roundToInt()}% ${if (input.remaining) "left" else "used"} now (est.) · " } ?: ""
+        text(canvas, estimate + ClockText.resetsAt(w.reset, input.now, input.use24), x * d, (y + 36) * d, width * d, paint(10f, ink.faint, d))
         return 44f
     }
 
@@ -200,7 +217,7 @@ object WidgetRenderer {
         var y = dockTop + dockHeight + 6
         for ((p, window) in rows) {
             if (y + 40 > h - pad + 4) break
-            y += row(canvas, "${p.name} · ${window.label}", window, pad, y, w - pad * 2, d, ink, input)
+            y += row(canvas, "${p.name} · ${window.label}", window, pad, y, w - pad * 2, d, ink, input, p.id)
         }
     }
 
@@ -217,11 +234,11 @@ object WidgetRenderer {
             text(canvas, percent(p, input.remaining, input.now), cx * d, (cy + ringSize / 2 + 17) * d, ringSize * d, paint(15f, ink.text, d, true), Paint.Align.CENTER)
             secondary(p, input.remaining, input.now)?.let { text(canvas, it, cx * d, (cy + ringSize / 2 + 31) * d, ringSize * d, paint(10.5f, ink.muted, d), Paint.Align.CENTER) }
             var y = top; val x = pad + ringSize + 16; val width = w - x - pad
-            for (window in windows) { if (y + 40 > h - pad + 4) break; y += row(canvas, window.label, window, x, y, width, d, ink, input) }
+            for (window in windows) { if (y + 40 > h - pad + 4) break; y += row(canvas, window.label, window, x, y, width, d, ink, input, p.id) }
         } else {
             var y = top
             if (windows.isEmpty()) text(canvas, p.statusText ?: "No limits reported", pad * d, (y + 12) * d, (w - pad * 2) * d, paint(11f, ink.muted, d))
-            for (window in windows) { if (y + 40 > h - pad + 4) break; y += row(canvas, window.label, window, pad, y, w - pad * 2, d, ink, input) }
+            for (window in windows) { if (y + 40 > h - pad + 4) break; y += row(canvas, window.label, window, pad, y, w - pad * 2, d, ink, input, p.id) }
         }
     }
 

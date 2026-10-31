@@ -135,6 +135,12 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     var liveUpdate by remember { mutableStateOf(LiveUpdate.enabled(context) && ResetAlerts.canNotify(context)) }
     var usageAlerts by remember { mutableStateOf(UsageAlerts.enabled(context) && ResetAlerts.canNotify(context)) }
     var recap by remember { mutableStateOf(WeeklyRecap.enabled(context) && ResetAlerts.canNotify(context)) }
+    var preReset by remember { mutableStateOf(Reminders.preReset(context) && ResetAlerts.canNotify(context)) }
+    var goodMoment by remember { mutableStateOf(Reminders.goodMoment(context) && ResetAlerts.canNotify(context)) }
+    var levels by remember { mutableStateOf(AlertPrefs.warn(repo.prefs) to AlertPrefs.critical(repo.prefs)) }
+    var quiet by remember { mutableStateOf(Triple(AlertPrefs.quietOn(repo.prefs), AlertPrefs.quietStart(repo.prefs), AlertPrefs.quietEnd(repo.prefs))) }
+    var refreshNote by remember { mutableStateOf("") }
+    var pendingSettings by remember { mutableIntStateOf(repo.pendingSettings()) }
     var followed by remember { mutableStateOf(repo.prefs.getString("liveProvider", null)) }
     var askingFor by remember { mutableStateOf<String?>(null) }
     var savedBudgets by remember { mutableStateOf(Budgets.all(repo.prefs)) }
@@ -146,9 +152,17 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val pageStates = List(TABS.size) { rememberLazyListState() }
     val listState = pageStates[0]
-    fun reload() { snapshot = repo.snapshot(); pairing = repo.pairing(); error = repo.error(); offline = repo.offline(); source = repo.source(); update = Updates.available(context) }
+    fun reload() {
+        snapshot = repo.snapshot(); pairing = repo.pairing(); error = repo.error(); offline = repo.offline(); source = repo.source(); update = Updates.available(context)
+        // Settings synced from the PC can change budgets, colours, alert levels and quiet hours.
+        savedBudgets = Budgets.all(repo.prefs); accentVersion++; pendingSettings = repo.pendingSettings()
+        levels = AlertPrefs.warn(repo.prefs) to AlertPrefs.critical(repo.prefs)
+        quiet = Triple(AlertPrefs.quietOn(repo.prefs), AlertPrefs.quietStart(repo.prefs), AlertPrefs.quietEnd(repo.prefs))
+    }
     fun afterSync() { reload(); afterNewData(context) }
-    fun refresh() { if (!busy) scope.launch { busy = true; refreshing = true; try { repo.refresh() } catch (_: Exception) { } finally { afterSync(); busy = false; refreshing = false } } }
+    fun refresh() { if (!busy) scope.launch { busy = true; refreshing = true; try { repo.refresh(explicit = true) } catch (_: Exception) { } finally { afterSync(); refreshNote = repo.refreshNote(); busy = false; refreshing = false } } }
+    /** After a change to a synced setting: send it to the PC now if it's on this network; otherwise it waits. */
+    fun syncSoon() { reload(); scope.launch { try { repo.syncSettings() } catch (_: Exception) { }; pendingSettings = repo.pendingSettings() } }
     fun importPairing(read: suspend () -> String) {
         if (busy) return
         scope.launch {
@@ -186,6 +200,8 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
         "reset" -> { alerts = on; ResetAlerts.setEnabled(context, on) }
         "live" -> { liveUpdate = on; LiveUpdate.setEnabled(context, on) }
         "recap" -> { recap = on; WeeklyRecap.setEnabled(context, on) }
+        "pre" -> { preReset = on; Reminders.setPreReset(context, on) }
+        "good" -> { goodMoment = on; Reminders.setGoodMoment(context, on) }
         else -> { usageAlerts = on; UsageAlerts.setEnabled(context, on); UsageAlerts.evaluate(context) }
     }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> askingFor?.let { applyNotify(it, granted) }; askingFor = null }
@@ -244,13 +260,15 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                             val others = budgets.filterNot { it.provider == openProvider.id && it.window == window }
                             val next = if (b == null) others else others + b.copy(provider = openProvider.id, window = window)
                             if (demo) demoBudgets = next
-                            else { if (b == null) Budgets.remove(repo.prefs, openProvider.id, window) else Budgets.set(repo.prefs, b.copy(provider = openProvider.id, window = window)); savedBudgets = Budgets.all(repo.prefs); afterNewData(context) }
+                            else { if (b == null) Budgets.remove(repo.prefs, openProvider.id, window) else Budgets.set(repo.prefs, b.copy(provider = openProvider.id, window = window)); savedBudgets = Budgets.all(repo.prefs); afterNewData(context); syncSoon() }
                         },
                         onAccent = { color ->
                             if (demo) demoAccents = demoAccents + (providerKind(openProvider.id) to color)
-                            else { Accents.set(repo.prefs, openProvider.id, color); accentVersion++; runCatching { updateWidgets(context) } }
+                            else { Accents.set(repo.prefs, openProvider.id, color); accentVersion++; runCatching { updateWidgets(context) }; syncSoon() }
                         },
-                        onDashboard = openUrl) { detail = null }
+                        onDashboard = openUrl, incidents = shown?.incidents.orEmpty(),
+                        customName = if (demo) null else SharedSettings.nameOf(repo.prefs, openProvider.id),
+                        onName = { name -> SharedSettings.setName(repo.prefs, openProvider.id, name); runCatching { updateWidgets(context) }; syncSoon() }) { detail = null }
                     else CompositionLocalProvider(LocalRingShare provides share) {
                         AnimatedContent(targetState = page, transitionSpec = {
                             if (reduced) fadeIn(snap()) togetherWith fadeOut(snap())
@@ -271,13 +289,15 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                     if (error.isNotBlank() && connected) item(key = "error") { Notice("Connection needs attention", error) }
                                     when (current) {
                                         0 -> {
-                                            if (offlineNotice) item(key = "offline") { Notice("PC offline", "Showing saved readings from ${ClockText.age(repo.lastSync(), now)}.", tone = t.muted) }
+                                            if (offlineNotice) item(key = "offline") { Notice("PC offline", "Showing saved readings from ${ClockText.age(repo.lastSync(), now)}. Dashed bars estimate where usage is now.", tone = t.muted) }
+                                            if (refreshNote == "throttled") item(key = "refreshNote") { Notice("Up to date", "Your PC read your usage moments ago, so this is its latest reading.", tone = Color(Palette.LIVE)) }
+                                            shown?.incidents.orEmpty().forEachIndexed { i, incident -> item(key = "incident-$i") { IncidentBanner(incident, providers.firstOrNull { it.kind == providerKind(incident.provider) }?.name ?: PhoneNames.of(incident.provider), openUrl) } }
                                             if (providers.isEmpty()) item(key = "pair") { PairCard(busy, connected, { scan() }, { pasting = true }, { picker.launch(arrayOf("*/*")) }, { demo = true }) }
                                             else {
                                                 item(key = "dock") {
                                                     Panel(Modifier.fillMaxWidth()) {
                                                         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                                            providers.forEach { p -> DockCell(p, remaining, now, reduced, selected == p.id, budget = budgetsFor(p.id).firstOrNull { it.window == p.sessionWindow()?.id }) { selected = p.id; detail = p.id } }
+                                                            providers.forEach { p -> DockCell(p, remaining, now, reduced, selected == p.id, budget = budgetsFor(p.id).firstOrNull { it.window == p.sessionWindow()?.id }, budgets = budgetsFor(p.id)) { selected = p.id; detail = p.id } }
                                                         }
                                                     }
                                                 }
@@ -286,7 +306,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                                 } }
                                             }
                                         }
-                                        1 -> historyPage(if (demo) providers else snapshot?.providers.orEmpty(), historyState, clock24, reduced, day) { dayOpen = it.encode() }
+                                        1 -> historyPage(if (demo) providers else snapshot?.providers.orEmpty(), historyState, clock24, reduced, day, { dayOpen = it.encode() }, shown?.tokens)
                                         2 -> {
                                             item { WidgetPreviews(shown ?: demoSnapshot(), now, t.dark, remaining, clock24, offline && !demo, budgets) }
                                             item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -303,6 +323,15 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                             snapshot?.providers.orEmpty(), followed, { id -> followed = id; repo.prefs.edit().putString("liveProvider", id).apply(); LiveUpdate.update(context); UsageTileService.refresh(context) },
                                             remaining, { remaining = it; save("remaining", it) }, clock24, { clock24 = it; save("clock24", it) }, reduced, { reduced = it; save("reduceMotion", it) },
                                             checkUpdates, { checkUpdates = it; save("checkUpdates", it); update = Updates.available(context) }, reducedMotion = reduced, openUrl = openUrl,
+                                            extras = SettingsExtras(preReset, goodMoment, levels.first, levels.second, quiet.first, quiet.second, quiet.third,
+                                                syncLine = if (snapshot?.has("settings") == true && pairing != null) (if (pendingSettings > 0) "Settings sync · $pendingSettings ${if (pendingSettings == 1) "change waits" else "changes wait"} for your PC's Wi-Fi" else "Budgets, colours, names and alerts sync with ${pairing?.name}") else null,
+                                                providers = snapshot?.providers.orEmpty(),
+                                                setLevels = { w, c -> AlertPrefs.setThresholds(repo.prefs, w, c); syncSoon() },
+                                                setQuiet = { on, s, e -> AlertPrefs.setQuiet(repo.prefs, on, s, e); syncSoon() },
+                                                move = { id, delta ->
+                                                    val ids = snapshot?.providers.orEmpty().map { it.id }.toMutableList(); val i = ids.indexOf(id); val j = i + delta
+                                                    if (i >= 0 && j in ids.indices) { ids.add(j, ids.removeAt(i)); SharedSettings.setOrder(repo.prefs, ids); runCatching { updateWidgets(context) }; syncSoon() }
+                                                }),
                                         )
                                     }
                                 }
@@ -399,6 +428,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     providers: List<Provider>, followed: String?, follow: (String) -> Unit,
     remaining: Boolean, setRemaining: (Boolean) -> Unit, clock24: Boolean, setClock24: (Boolean) -> Unit, reduced: Boolean, setReduced: (Boolean) -> Unit,
     checkUpdates: Boolean, setCheckUpdates: (Boolean) -> Unit, reducedMotion: Boolean, openUrl: (String) -> Unit,
+    extras: SettingsExtras,
 ) {
     item { Group {
         Column(Modifier.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -409,6 +439,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
                 if (pairing != null) Icon(if (pairing.relay != null) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff, if (pairing.relay != null) "Internet sync on" else "Internet sync off", tint = if (pairing.relay != null) t.accent else t.faint, modifier = Modifier.size(18.dp))
             }
             if (pairing != null) Text(if (pairing.relay != null) "Internet sync on · end-to-end encrypted" else "Internet sync off · turn it on in Settings → Phone on your PC", fontSize = 12.sp, color = t.muted)
+            extras.syncLine?.let { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Sync, null, tint = t.accent, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(6.dp)); Text(it, fontSize = 12.sp, color = t.muted) } }
             GlassButton(scan, Modifier.fillMaxWidth(), prominent = true, enabled = !busy) { Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text(if (pairing == null) "Scan QR code" else "Scan a new code", fontWeight = FontWeight.SemiBold) }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 GlassButton(paste, Modifier.weight(1f), enabled = !busy) { Text("Paste code") }
@@ -434,12 +465,24 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
             choices.forEach { p -> GlassChip(p.name, p.id == current, leading = { Logo(p.id, Modifier.size(15.dp)) }) { follow(p.id) } }
         }
         Divider()
-        SettingToggle("Usage alerts", "80%, 95%, budgets and pace", usageAlerts) { setNotify("usage", it) }
+        SettingToggle("Usage alerts", "${extras.warn}%, ${extras.critical}%, budgets and pace", usageAlerts) { setNotify("usage", it) }
+        if (usageAlerts) AlertLevels(extras.warn, extras.critical, extras.setLevels)
         Divider()
         SettingToggle("Reset alerts", "When a limit renews", resetAlerts) { setNotify("reset", it) }
         Divider()
+        SettingToggle("Before a limit renews", "10 minutes ahead, for limits you've used half of", extras.preReset) { setNotify("pre", it) }
+        Divider()
+        SettingToggle("Good moment to start", "When starting now renews mid-way through your busy hours", extras.goodMoment) { setNotify("good", it) }
+        Divider()
         SettingToggle("Weekly recap", "Sunday evening", recap) { setNotify("recap", it) }
+        Divider()
+        SettingToggle("Quiet hours", if (extras.quietOn) "No alert sounds or pop-ups ${Budget.clock(extras.quietStart * 60, false)}–${Budget.clock(extras.quietEnd * 60, false)}" else "Silence alerts overnight", extras.quietOn) { extras.setQuiet(it, extras.quietStart, extras.quietEnd) }
+        if (extras.quietOn) QuietHours(extras.quietStart, extras.quietEnd) { s, e -> extras.setQuiet(true, s, e) }
     } }
+    if (extras.providers.size > 1) {
+        item { SectionLabel("Provider order") }
+        item { Group { ProviderOrder(extras.providers, extras.move) } }
+    }
     item { SectionLabel("Display") }
     item { Group {
         SettingToggle("Show remaining", null, remaining, setRemaining)
@@ -455,6 +498,57 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
         TextButton(onClick = { openUrl(Updates.RELEASES) }) { Text("Downloads", color = LocalTokens.current.muted) }
     } }
 }
+/** Settings that arrived with protocol 2: reminders, alert levels, quiet hours and the provider order (all but reminders sync with the PC). */
+class SettingsExtras(
+    val preReset: Boolean, val goodMoment: Boolean, val warn: Int, val critical: Int, val quietOn: Boolean, val quietStart: Int, val quietEnd: Int,
+    val syncLine: String?, val providers: List<Provider>,
+    val setLevels: (Int, Int) -> Unit, val setQuiet: (Boolean, Int, Int) -> Unit, val move: (String, Int) -> Unit,
+)
+
+/** Warning and urgent levels for usage alerts, in steps of five. Saved when the slider is released. */
+@Composable private fun AlertLevels(warn: Int, critical: Int, set: (Int, Int) -> Unit) {
+    val t = LocalTokens.current
+    var w by remember(warn) { mutableFloatStateOf(warn.toFloat()) }; var c by remember(critical) { mutableFloatStateOf(critical.toFloat()) }
+    val colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = t.accent, inactiveTrackColor = t.track, activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent)
+    Column(Modifier.padding(bottom = 10.dp)) {
+        Row { Text("Warning", fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f)); Text("${w.toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(Palette.readable(Palette.usage(w / 100.0), t.card.toArgb()))) }
+        Slider(w, { w = (it / 5).toInt() * 5f; if (c < w) c = w }, valueRange = 50f..95f, steps = 8, onValueChangeFinished = { set(w.toInt(), c.toInt()) }, colors = colors, modifier = Modifier.semantics { contentDescription = "Warning level" })
+        Row { Text("Urgent", fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f)); Text("${c.toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(Palette.readable(Palette.usage(c / 100.0), t.card.toArgb()))) }
+        Slider(c, { c = maxOf(w, (it / 5).toInt() * 5f) }, valueRange = 60f..100f, steps = 7, onValueChangeFinished = { set(w.toInt(), c.toInt()) }, colors = colors, modifier = Modifier.semantics { contentDescription = "Urgent level" })
+    }
+}
+
+/** Start and end hours for quiet hours; equal hours mean all day, as on the PC. */
+@Composable private fun QuietHours(start: Int, end: Int, set: (Int, Int) -> Unit) {
+    val t = LocalTokens.current
+    var s by remember(start) { mutableFloatStateOf(start.toFloat()) }; var e by remember(end) { mutableFloatStateOf(end.toFloat()) }
+    val colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = t.accent, inactiveTrackColor = t.track, activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent)
+    Column(Modifier.padding(bottom = 10.dp)) {
+        Row { Text("From", fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f)); Text(Budget.clock(s.toInt() * 60, false), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = t.text) }
+        Slider(s, { s = it.roundToIntCompat().toFloat() }, valueRange = 0f..23f, steps = 22, onValueChangeFinished = { set(s.toInt(), e.toInt()) }, colors = colors, modifier = Modifier.semantics { contentDescription = "Quiet hours start" })
+        Row { Text("Until", fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f)); Text(Budget.clock(e.toInt() * 60, false), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = t.text) }
+        Slider(e, { e = it.roundToIntCompat().toFloat() }, valueRange = 0f..23f, steps = 22, onValueChangeFinished = { set(s.toInt(), e.toInt()) }, colors = colors, modifier = Modifier.semantics { contentDescription = "Quiet hours end" })
+    }
+}
+private fun Float.roundToIntCompat() = kotlin.math.round(this).toInt()
+
+/** The order of your providers everywhere: dock, cards, widgets. Syncs with the PC's dock. */
+@Composable private fun ProviderOrder(providers: List<Provider>, move: (String, Int) -> Unit) {
+    val t = LocalTokens.current
+    providers.forEachIndexed { i, p ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).animateContentSize(), verticalAlignment = Alignment.CenterVertically) {
+            Logo(p.id, Modifier.size(20.dp)); Spacer(Modifier.width(12.dp))
+            Text(p.name, fontSize = 15.sp, color = t.text, modifier = Modifier.weight(1f))
+            IconButton(onClick = { move(p.id, -1) }, enabled = i > 0) { Icon(Icons.Outlined.KeyboardArrowUp, "Move ${p.name} up", tint = if (i > 0) t.muted else t.hairline) }
+            IconButton(onClick = { move(p.id, 1) }, enabled = i < providers.lastIndex) { Icon(Icons.Outlined.KeyboardArrowDown, "Move ${p.name} down", tint = if (i < providers.lastIndex) t.muted else t.hairline) }
+        }
+        if (i < providers.lastIndex) Divider()
+    }
+}
+
+/** Names for providers that appear only in incidents. */
+internal object PhoneNames { fun of(id: String) = when (providerKind(id)) { "claude" -> "Claude"; "codex", "openai-api" -> "OpenAI"; "gemini" -> "Gemini"; "cursor" -> "Cursor"; else -> id.replaceFirstChar { it.uppercase() } } }
+
 @Composable private fun Group(content: @Composable ColumnScope.() -> Unit) { Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(horizontal = 18.dp, vertical = 2.dp), content = content) } }
 @Composable private fun Divider() { HorizontalDivider(color = LocalTokens.current.hairline) }
 
@@ -508,11 +602,48 @@ internal fun demoSnapshot(): Snapshot {
         Provider("claude", "Claude", "Ok", listOf(window("five_hour", "Current session", .27, now + 7_845_000, forecast = Forecast("Estimated 61.4% used at reset", 15.6, 61.4, null, "Consistent pace")), window("seven_day", "All models", .41, now + 231_845_000), window("seven_day_sonnet", "Sonnet weekly", .12, now + 231_845_000)),
             account = "Sample account", updatedAt = now, manageUrl = "https://claude.ai/settings/usage", session = "five_hour", weekly = "seven_day",
             extras = listOf(Extra("extra_usage", "Usage credits", "Pay-as-you-go usage after plan limits", null, 3.5, null, "USD")),
-            history = listOf(demoHistory("five_hour", "Current session", 1.0, 3), demoHistory("seven_day", "All models", .16, 5))),
+            history = listOf(demoInsights(demoHistory("five_hour", "Current session", 1.0, 3), now, 5 * 3_600_000L, 3), demoInsights(demoHistory("seven_day", "All models", .16, 5), now, 7 * 86_400_000L, 5))),
         Provider("codex", "Codex", "Ok", listOf(window("codex-primary", "5-hour limit", .16, now + 11_400_000), window("codex-secondary", "Weekly limit", .49, now + 401_840_000)), updatedAt = now, manageUrl = "https://chatgpt.com/codex/settings/usage", session = "codex-primary", weekly = "codex-secondary",
             history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11))),
         Provider("gemini", "Gemini", "Ok", listOf(window("gemini-2.5-pro", "Gemini 2.5 Pro", .72, now + 50_000_000)), updatedAt = now),
-    ), "sample")
+        Provider("codex:work", "Codex · Work", "Ok", listOf(window("codex-primary", "5-hour limit", .58, now + 4_100_000, forecast = Forecast("Estimated 92.0% used at reset", 22.0, 92.0, null, "Consistent pace")), window("codex-secondary", "Weekly limit", .33, now + 301_840_000)),
+            updatedAt = now, session = "codex-primary", weekly = "codex-secondary", kind = "codex", accountLabel = "Work"),
+    ), "sample", protocol = 2, features = Snapshot.FEATURES.split(',').toSet(),
+        incidents = listOf(Incident("claude", "Elevated errors on Claude Opus", "minor", "monitoring", "https://status.claude.com", now - 1_800_000)),
+        tokens = demoTokens(now))
+}
+
+/** Sample protocol 2 insights for a history: 7 days of readings, finished periods, limits reached, reliability, sessions and events. */
+internal fun demoInsights(h: History, now: Long, period: Long, seed: Int): History {
+    val random = java.util.Random(seed.toLong())
+    val trend = mutableListOf<Reading>(); var at = now - 7 * 86_400_000L; var used = 0.0; var start = at; var periodId = 0
+    val unused = mutableListOf<UnusedPeriod>(); val hits = mutableListOf<LimitHit>(); var peak = 0.0
+    while (at <= now) {
+        if (at - start >= period) { unused += UnusedPeriod(at, peak.coerceAtMost(1.0)); if (peak >= .995) hits += LimitHit(at - 3_000_000, at); start = at; used = 0.0; peak = 0.0; periodId++ }
+        val hour = java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault()).hour
+        used = (used + if (hour in 9..19) random.nextDouble() * .035 else random.nextDouble() * .004).coerceAtMost(1.0); peak = maxOf(peak, used)
+        trend += Reading(at, used, "p$periodId"); at += 25 * 60_000L
+    }
+    val events = unused.takeLast(4).map { HistoryEvent(it.end, "Confirmed reset", "A lower reading and an advanced reset time confirm a reset between observations.") } +
+        listOf(HistoryEvent(now - 30 * 3_600_000L, "Sampling gap", "No observations for 46 minutes. Usage during this time is unknown."))
+    val sessions = (1..4).map { i -> val s = now - i * 26 * 3_600_000L; WorkSession(s, s + (2 + i % 3) * 3_600_000L, 9.0 + i * 3.5, 18.0 + i * 4) }
+    return h.copy(trend = trend.takeLast(400), unused = unused.takeLast(12), hits = hits.takeLast(5) + LimitHit(now - 50 * 3_600_000L, now - 48 * 3_600_000L),
+        reliability = Reliability(unused.size, unused.size - 1, 1, 6.0, unused.size - 1, 1), events = events.sortedBy { it.at }, sessions = sessions)
+}
+
+internal fun demoTokens(now: Long): TokenUsage {
+    val today = java.time.LocalDate.now()
+    fun days(scale: Long, seed: Long): List<TokenDay> { val r = java.util.Random(seed); return (29 downTo 0).map { back -> val d = today.minusDays(back.toLong()); val weekend = d.dayOfWeek.value >= 6
+        val total = if (weekend) (scale * r.nextDouble() * .2).toLong() else (scale * (.4 + r.nextDouble() * .6)).toLong(); TokenDay(d.toString(), total, total / 1_000_000.0 * 1.9) } }
+    fun totals(total: Long, cost: Double) = TokenTotals(total / 50, total / 40, total * 8 / 10, total / 10, total, cost)
+    val claude = days(42_000_000, 3); val codex = days(18_000_000, 5)
+    return TokenUsage(now, listOf(
+        TokenSource("claude", "Claude Code", totals(claude.last().total, claude.last().cost!!), totals(claude.takeLast(7).sumOf { it.total }, claude.takeLast(7).sumOf { it.cost!! }), claude,
+            listOf(TokenShare("UsageNotch-Windows", 96_000_000, 182.0, .46), TokenShare("UsageNotch-Android", 61_000_000, 115.0, .29), TokenShare("Arnav-AI-Website", 31_000_000, 58.0, .15), TokenShare("Orbitarium Website", 21_000_000, 40.0, .10)),
+            listOf(TokenShare("claude-opus-5-5", 176_000_000, 352.0, .84), TokenShare("claude-haiku-5-5", 33_000_000, 4.5, .16))),
+        TokenSource("codex", "Codex", totals(codex.last().total, codex.last().cost!!), totals(codex.takeLast(7).sumOf { it.total }, codex.takeLast(7).sumOf { it.cost!! }), codex,
+            listOf(TokenShare("FLD_ML-main", 52_000_000, null, .62), TokenShare("Orbitarium Website", 32_000_000, null, .38)), listOf(TokenShare("gpt-6.1-sol", 84_000_000, null, 1.0))),
+    ))
 }
 
 /** Offers the Quick Settings tile. Android 13+ adds it in one tap; older versions add it from the tile editor. */

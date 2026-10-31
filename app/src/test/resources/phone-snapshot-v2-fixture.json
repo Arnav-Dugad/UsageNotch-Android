@@ -1,0 +1,56 @@
+{
+  "schema": 1, "protocol": 2,
+  "features": ["refresh", "settings", "trend", "insights", "tokens", "incidents", "accounts", "future-thing"],
+  "generatedAt": 1790000000000, "source": "windows-app", "appVersion": "2.6.0",
+  "shared": {
+    "budget:claude|five_hour": { "v": { "limit": 60, "by": 1080 }, "at": 1790000000000 },
+    "budget:codex|codex-secondary": { "v": null, "at": 1789990000000 },
+    "accent:claude": { "v": "#7a5cff", "at": 1790000000000 },
+    "accent:codex": { "v": "red", "at": 1790000000000 },
+    "name:claude:work": { "v": "Work Claude", "at": 1790000000000 },
+    "order": { "v": ["codex", "claude", "claude:work"], "at": 1790000000000 },
+    "alerts:thresholds": { "v": { "warn": 70, "critical": 90 }, "at": 1790000000000 },
+    "alerts:quiet": { "v": { "on": true, "start": 22, "end": 7 }, "at": 1790000000000 },
+    "budget:claude|seven_day": { "v": { "limit": 0, "by": null }, "at": 1790000000000 },
+    "unknown:key": { "v": 1, "at": 1790000000000 }
+  },
+  "incidents": [
+    { "provider": "claude", "title": "Elevated errors on Claude Opus", "impact": "minor", "status": "investigating", "url": "https://status.claude.com/incidents/x", "updatedAt": 1789999000000 },
+    { "provider": "cursor", "title": "Degraded tab completions", "impact": "major", "status": "identified", "url": "javascript:alert(1)", "updatedAt": 1789999500000 }
+  ],
+  "tokens": {
+    "updatedAt": 1790000000000,
+    "sources": [
+      { "id": "claude", "label": "Claude Code",
+        "today": { "input": 1200, "output": 5400, "cacheRead": 880000, "cacheWrite": 42000, "total": 928600, "cost": 1.23 },
+        "week": { "input": 9000, "output": 40000, "cacheRead": 6100000, "cacheWrite": 300000, "total": 6449000, "cost": 9.87 },
+        "days": [ { "date": "2026-09-20", "total": 5520400, "cost": 8.64 }, { "date": "2026-09-21", "total": 928600, "cost": 1.23 } ],
+        "projects": [ { "name": "UsageNotch-Windows", "total": 4000000, "cost": 6.1, "share": 0.62 }, { "name": "Website", "total": 2449000, "cost": 3.77, "share": 0.38 } ],
+        "models": [ { "name": "claude-opus-5-5", "total": 6000000, "cost": 9.5, "share": 0.93 }, { "name": "claude-haiku-5-5", "total": 449000, "cost": null, "share": 0.07 } ] },
+      { "id": "codex", "label": "Codex", "today": null, "week": { "input": 100, "output": 20, "cacheRead": 0, "cacheWrite": 0, "total": 120, "cost": null }, "days": [], "projects": [], "models": [] }
+    ]
+  },
+  "providers": [
+    { "id": "claude", "kind": "claude", "name": "Claude", "status": "Ok", "session": "five_hour", "weekly": "seven_day", "updatedAt": 1790000000000,
+      "windows": [
+        { "id": "five_hour", "label": "Current session", "used": 0.42, "at": 1790000000000, "reset": 1790007200000,
+          "points": [ { "at": 1789996400000, "used": 0.30, "period": "p1" }, { "at": 1790000000000, "used": 0.42, "period": "p1" } ],
+          "forecast": { "summary": "Estimated 66.0% used at reset", "rate": 12.0, "projected": 66.0, "limitAt": null, "confidence": "Consistent pace" } },
+        { "id": "seven_day", "label": "All models", "used": 0.31, "at": 1790000000000, "reset": 1790400000000, "points": [] }
+      ],
+      "history": [
+        { "window": "five_hour", "label": "Current session", "days": [ { "date": "2026-09-21", "used": 0.8 } ], "heat": [ 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ],
+          "observed": [ 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 ],
+          "streak": 3, "calendar": [ { "date": "2026-09-21", "used": 0.8 } ],
+          "trend": [ { "at": 1789400000000, "used": 0.05, "period": "a" }, { "at": 1789996400000, "used": 0.30, "period": "p1" }, { "at": 1790000000000, "used": 0.42, "period": "p1" } ],
+          "unused": [ { "end": 1789980000000, "peak": 0.54 }, { "end": 1789998000000, "peak": 1.0 } ],
+          "hits": [ { "at": 1789995000000, "reset": 1789998000000 } ],
+          "reliability": { "periods": 20, "fixed": 19, "moved": 1, "averageShiftMinutes": 4.0, "confirmed": 18, "changed": 2 },
+          "events": [ { "at": 1789998000000, "kind": "Confirmed reset", "text": "A lower usage reading and an advanced reset time confirm a reset." } ],
+          "sessions": [ { "start": 1789990000000, "end": 1789999000000, "used": 12.5, "peak": 30.0 } ] }
+      ] },
+    { "id": "claude:work", "kind": "claude", "accountLabel": "Work", "name": "Claude", "status": "Ok", "session": "five_hour", "updatedAt": 1790000000000,
+      "windows": [ { "id": "five_hour", "label": "Current session", "used": 0.12, "at": 1790000000000, "reset": 1790010000000, "points": [] } ] },
+    { "id": "codex", "name": "Codex", "status": "Ok", "windows": [ { "id": "codex-primary", "label": "5-hour limit", "used": 0.2, "at": 1790000000000, "reset": 1790010000000, "points": [] } ] }
+  ]
+}

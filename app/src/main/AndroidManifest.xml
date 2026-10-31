@@ -46,6 +46,7 @@
         </receiver>
         <receiver android:name=".ResetAlertReceiver" android:exported="false" />
         <receiver android:name=".RecapReceiver" android:exported="false" />
+        <receiver android:name=".ReminderReceiver" android:exported="false" />
         <!-- Exported only for these system-protected broadcasts, which other apps cannot send. -->
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

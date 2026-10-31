@@ -35,6 +35,19 @@ fun UsageWindow.timeLeft(now: Long): Float? {
     return (left.toDouble() / period).toFloat().coerceIn(0f, 1f)
 }
 
+/**
+ * While the PC is off or the reading is old, where usage probably is now: the last reading plus the PC's observed pace
+ * for the time since. Null when there's no pace, the reading is fresh, the limit has reset, or the gap is too long
+ * (over 12 hours) for an estimate to mean anything. Always an estimate, never shown as a reading.
+ */
+fun UsageWindow.estimateNow(now: Long, offline: Boolean): Double? {
+    val rate = forecast?.rate?.takeIf { it > 0.0001 } ?: return null
+    val age = now - at
+    if (resetPassed(now) || age <= 0 || age > 12 * HOUR || (!offline && age < 20 * 60_000)) return null
+    val estimate = (used + rate / 100.0 * age / HOUR).coerceAtMost(1.0)
+    return estimate.takeIf { it >= used + 0.005 }
+}
+
 /** A usage budget for one window: stay at or under [limit]% used, optionally by a time of day ([byMinute] after midnight). */
 data class Budget(val provider: String, val window: String, val limit: Int, val byMinute: Int?) {
     fun label(use24: Boolean): String = "$limit%" + (byMinute?.let { " by " + clock(it, use24) } ?: "")
@@ -49,8 +62,12 @@ object Budgets {
             Budget(o.getString("provider"), o.getString("window"), o.getInt("limit").coerceIn(1, 100), if (o.has("by") && !o.isNull("by")) o.getInt("by").coerceIn(0, 1439) else null) }
     }.getOrDefault(emptyList())
     fun of(prefs: SharedPreferences, provider: String, window: String) = all(prefs).firstOrNull { it.provider == provider && it.window == window }
-    fun set(prefs: SharedPreferences, budget: Budget) = save(prefs, all(prefs).filterNot { it.provider == budget.provider && it.window == budget.window } + budget)
-    fun remove(prefs: SharedPreferences, provider: String, window: String) = save(prefs, all(prefs).filterNot { it.provider == provider && it.window == window })
+    /** A budget chosen on this phone: saved, and shared with the PC when it syncs settings. */
+    fun set(prefs: SharedPreferences, budget: Budget) =
+        SharedSettings.local(prefs, "budget:${budget.provider}|${budget.window}", JSONObject().put("limit", budget.limit.coerceIn(1, 100)).put("by", budget.byMinute ?: JSONObject.NULL))
+    fun remove(prefs: SharedPreferences, provider: String, window: String) = SharedSettings.local(prefs, "budget:$provider|$window", null)
+    /** Writes the list without recording a sync change; used when applying the PC's settings. */
+    internal fun store(prefs: SharedPreferences, list: List<Budget>) = save(prefs, list)
     private fun save(prefs: SharedPreferences, list: List<Budget>) {
         prefs.edit().putString(KEY, JSONArray(list.map { JSONObject().put("provider", it.provider).put("window", it.window).put("limit", it.limit).put("by", it.byMinute ?: JSONObject.NULL) }).toString()).apply()
     }

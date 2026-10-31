@@ -27,6 +27,7 @@ object ResetAlerts {
     }
     private fun intent(context: Context) = PendingIntent.getBroadcast(context, 7, Intent(context, ResetAlertReceiver::class.java).setAction(ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     internal fun nextReset(snapshot: Snapshot?, now: Long) = snapshot?.providers.orEmpty().flatMap { it.windows }.mapNotNull { it.reset }.filter { it > now }.minOrNull()
+    internal const val CHANNEL_ID = CHANNEL
     /** Windows whose reset fell in (after, now], grouped by provider name. */
     internal fun due(snapshot: Snapshot?, after: Long, now: Long): Map<String, List<UsageWindow>> =
         snapshot?.providers.orEmpty().associate { p -> p.name to p.windows.filter { w -> w.reset != null && w.at < w.reset && w.reset > after && w.reset <= now } }.filterValues { it.isNotEmpty() }
@@ -41,7 +42,7 @@ object ResetAlerts {
         val after = repo.prefs.getLong("alertedThrough", now)
         val due = due(repo.snapshot(), after, now)
         repo.prefs.edit().putLong("alertedThrough", now).apply()
-        if (!enabled(context) || due.isEmpty() || !canNotify(context)) return
+        if (!enabled(context) || due.isEmpty() || !canNotify(context) || AlertPrefs.isQuiet(repo.prefs, now)) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         runCatching { manager.deleteNotificationChannel("resets") }
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Limit resets", NotificationManager.IMPORTANCE_DEFAULT).apply {

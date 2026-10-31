@@ -21,6 +21,7 @@ fun afterNewData(context: Context) {
     runCatching { UsageAlerts.evaluate(context) }
     runCatching { UsageTileService.refresh(context) }
     runCatching { WeeklyRecap.schedule(context) }
+    runCatching { Reminders.schedule(context) }
 }
 
 private fun openApp(context: Context, request: Int) = PendingIntent.getActivity(context, request,
@@ -75,9 +76,10 @@ object LiveUpdate {
 }
 
 /**
- * Usage alerts: when a window passes 80% or 95% used, and when the PC's pace forecast says a limit runs out within
- * two hours, before its reset. Each alert fires once per reset period; readings seen while alerts were off are
- * remembered too, so turning them on never replays old alerts.
+ * Usage alerts: when a window passes your warning and urgent levels (80% and 95% unless you change them, on either
+ * device), and when the PC's pace forecast says a limit runs out within two hours, before its reset. Each alert fires
+ * once per reset period; readings seen while alerts were off or during quiet hours are remembered too, so they are
+ * never replayed later as a burst.
  */
 object UsageAlerts {
     private const val CHANNEL = "usage"
@@ -86,7 +88,9 @@ object UsageAlerts {
     fun setEnabled(context: Context, on: Boolean) { Repository(context).prefs.edit().putBoolean("usageAlerts", on).apply() }
     data class Alert(val key: String, val title: String, val body: String)
     /** Pure decision logic, tested without Android: which alerts are due that haven't been sent. */
-    fun due(snapshot: Snapshot?, sent: Set<String>, now: Long, use24: Boolean, budgets: List<Budget> = emptyList(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Alert> {
+    fun due(snapshot: Snapshot?, sent: Set<String>, now: Long, use24: Boolean, budgets: List<Budget> = emptyList(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+            levels: List<Int> = thresholds): List<Alert> {
+        val descending = levels.distinct().sortedDescending()
         val out = mutableListOf<Alert>()
         val today = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
         for (p in snapshot?.providers.orEmpty()) for (w in p.windows) {
@@ -104,11 +108,11 @@ object UsageAlerts {
             val period = "${p.id}|${w.id}|${w.reset ?: 0}"
             val used = (w.used * 100).toInt()
             // The highest level reached, once per period (sending 95% also marks 80% as sent).
-            thresholds.firstOrNull { used >= it }?.takeIf { "$period|$it" !in sent }?.let { t ->
+            descending.firstOrNull { used >= it }?.takeIf { "$period|$it" !in sent }?.let { t ->
                 out += Alert("$period|$t", "${p.name}: ${w.label} is $used% used", ClockText.resetsAt(w.reset, now, use24) + ".")
             }
             val limitAt = w.forecast?.limitAt
-            if (limitAt != null && limitAt > now && limitAt - now <= 2 * 3_600_000L && used < 95 && "$period|pace" !in sent) {
+            if (limitAt != null && limitAt > now && limitAt - now <= 2 * 3_600_000L && used < (descending.firstOrNull() ?: 95) && "$period|pace" !in sent) {
                 val minutes = (limitAt - now) / 60_000
                 val left = if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
                 out += Alert("$period|pace", "${p.name} runs out in about $left at this pace",
@@ -120,12 +124,16 @@ object UsageAlerts {
     fun evaluate(context: Context) {
         val repo = Repository(context); val prefs = repo.prefs; val now = System.currentTimeMillis()
         val sent = prefs.getStringSet("alertsSent", emptySet()).orEmpty()
-        val alerts = due(repo.snapshot(), sent, now, repo.use24(), Budgets.all(prefs))
+        val levels = AlertPrefs.thresholds(prefs)
+        val alerts = due(repo.snapshot(), sent, now, repo.use24(), Budgets.all(prefs), levels = levels)
         if (alerts.isEmpty()) return
         // Passing a higher level marks the lower ones sent too.
-        val keys = alerts.flatMap { a -> if (a.key.endsWith("|95")) listOf(a.key, a.key.removeSuffix("|95") + "|80") else listOf(a.key) }
+        val keys = alerts.flatMap { a ->
+            val level = a.key.substringAfterLast('|').toIntOrNull()
+            if (level == null || level !in levels) listOf(a.key) else listOf(a.key) + levels.filter { it < level }.map { a.key.substringBeforeLast('|') + "|$it" }
+        }
         prefs.edit().putStringSet("alertsSent", (sent + keys).toList().takeLast(300).toSet()).apply()
-        if (!enabled(context) || !ResetAlerts.canNotify(context)) return
+        if (!enabled(context) || !ResetAlerts.canNotify(context) || AlertPrefs.isQuiet(prefs, now)) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Usage alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "When a limit is nearly used up or running out quickly."; enableVibration(true); vibrationPattern = longArrayOf(0, 40, 90, 40)
@@ -191,7 +199,7 @@ object WeeklyRecap {
         alarms.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, nextAt(System.currentTimeMillis()), intent(context))
     }
     internal fun deliver(context: Context) {
-        if (!enabled(context) || !ResetAlerts.canNotify(context)) return
+        if (!enabled(context) || !ResetAlerts.canNotify(context) || AlertPrefs.isQuiet(Repository(context).prefs)) return
         val text = Recap.compose(Repository(context).snapshot(), java.time.LocalDate.now()) ?: return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Weekly recap", NotificationManager.IMPORTANCE_LOW).apply { description = "A summary of your week, on Sunday evenings." })

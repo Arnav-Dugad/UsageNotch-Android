@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,14 +34,14 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * One provider, full screen: a large ring (morphed from its dock ring), the pace, the best time to start, a budget,
- * a scrubbable 24-hour chart, every limit, and its accent colour. Back, including the predictive back gesture,
- * shrinks it toward the dashboard.
+ * One provider, full screen: a large ring (morphed from its dock ring), status-page incidents, the pace, the best time
+ * to start, a budget for any of its limits, the chart explorer (24 hours or 7 days), every limit, and its name and accent
+ * colour. Back, including the predictive back gesture, shrinks it toward the dashboard.
  */
 @Composable fun ProviderDetail(
     p: Provider, now: Long, remaining: Boolean, clock24: Boolean, reduced: Boolean, offline: Boolean, preview: Boolean,
     ringModifier: Modifier, budgets: List<Budget>, onBudget: (String, Budget?) -> Unit, onAccent: (Int?) -> Unit,
-    onDashboard: (String) -> Unit, onBack: () -> Unit,
+    onDashboard: (String) -> Unit, incidents: List<Incident> = emptyList(), customName: String? = null, onName: ((String?) -> Unit)? = null, onBack: () -> Unit,
 ) {
     val t = LocalTokens.current
     var backProgress by remember { mutableFloatStateOf(0f) }
@@ -67,7 +68,7 @@ import kotlin.math.roundToInt
             p.manageUrl?.let { url -> Spacer(Modifier.width(8.dp)); GlassIconButton(Icons.AutoMirrored.Outlined.OpenInNew, "Open ${p.name} dashboard", { onDashboard(url) }) }
         }
         Column(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            UsageRing(p, remaining, now, reduced, 224.dp, ringModifier, sessionBudget)
+            UsageRing(p, remaining, now, reduced, 224.dp, ringModifier, sessionBudget, budgets)
             Spacer(Modifier.height(18.dp))
             RollingText(headlineOf(p, remaining, now), 44.sp, t.text, FontWeight.Light, reduced)
             s?.let { w ->
@@ -75,19 +76,23 @@ import kotlin.math.roundToInt
                 if (!renewed && w.reset != null) Text(ClockText.resetsAt(w.reset, now, clock24) + " · " + ClockText.countdown(w.reset, now), fontSize = 12.sp, color = t.faint, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             }
             secondaryOf(p, remaining, now)?.let { Text(it, fontSize = 12.sp, color = t.faint, modifier = Modifier.padding(top = 2.dp)) }
+            s?.takeIf { !renewed && !preview }?.estimateNow(now, offline)?.let { e ->
+                EstimateLine(e, remaining, Modifier.padding(top = 10.dp).clip(CircleShape).background(Color(Palette.FORECAST).copy(alpha = .12f)).padding(horizontal = 12.dp, vertical = 6.dp))
+            }
         }
         val cards = mutableListOf<@Composable () -> Unit>()
+        incidents.filter { providerKind(it.provider) == p.kind }.forEach { i -> cards += { IncidentBanner(i, null, onDashboard) } }
         s?.takeIf { !renewed }?.forecast?.takeIf { it.rate != null || it.summary.startsWith("Learning") }?.let { f -> cards += { PaceCard(f, s, now, clock24) } }
         BestStart.hint(p, now)?.let { hint -> cards += { StartCard(hint, now, clock24) } }
-        s?.let { w -> cards += { BudgetCard(w, sessionBudget, now, clock24, reduced) { onBudget(w.id, it) } } }
-        s?.let { w -> cards += { Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { CardTitle(Icons.Outlined.ShowChart, "Last 24 hours"); Spacer(Modifier.height(8.dp)); ScrubChart(w, clock24) } } } }
+        if (p.windows.isNotEmpty()) cards += { BudgetCard(p, budgets, now, clock24, reduced, onBudget) }
+        s?.let { w -> cards += { Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { ChartExplorer(p, w, clock24, reduced, now, sessionBudget) } } } }
         if (p.windows.isNotEmpty() || p.statusText != null) cards += {
             Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
                 p.statusText?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = t.muted, modifier = Modifier.padding(6.dp)) }
-                p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }); if (index < p.windows.lastIndex) Spacer(Modifier.height(8.dp)) }
+                p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }, offline && !preview); if (index < p.windows.lastIndex) Spacer(Modifier.height(8.dp)) }
             } }
         }
-        cards += { AccentCard(p, onAccent) }
+        cards += { AccentCard(p, onAccent, customName, onName.takeIf { !preview }) }
         cards.forEachIndexed { index, card ->
             // Cards rise in one after another as the view opens.
             var shown by remember { mutableStateOf(reduced) }
@@ -137,11 +142,24 @@ import kotlin.math.roundToInt
     } }
 }
 
-/** A budget for the session window: stay under a percentage, optionally by a time of day. */
-@Composable private fun BudgetCard(w: UsageWindow, budget: Budget?, now: Long, clock24: Boolean, reduced: Boolean, onChange: (Budget?) -> Unit) {
+/**
+ * A budget for any of the provider's limits: stay under a percentage, optionally by a time of day. Chips choose the
+ * limit (the session first); a dot marks limits that already have one. Budgets sync with the PC.
+ */
+@Composable private fun BudgetCard(p: Provider, budgets: List<Budget>, now: Long, clock24: Boolean, reduced: Boolean, onBudget: (String, Budget?) -> Unit) {
     val t = LocalTokens.current
-    var limit by remember(budget?.limit) { mutableFloatStateOf((budget?.limit ?: 60).toFloat()) }
+    var windowId by rememberSaveable(p.id) { mutableStateOf(p.sessionWindow()?.id ?: p.windows.first().id) }
+    val w = p.windows.firstOrNull { it.id == windowId } ?: p.windows.first()
+    val budget = budgets.firstOrNull { it.window == w.id }
+    val onChange: (Budget?) -> Unit = { onBudget(w.id, it) }
+    var limit by remember(w.id, budget?.limit) { mutableFloatStateOf((budget?.limit ?: 60).toFloat()) }
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = if (budget != null) 14.dp else 6.dp).animateContentSize(if (reduced) snap() else spring(dampingRatio = .8f, stiffness = 380f))) {
+        if (p.windows.size > 1) Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            p.windows.forEach { option ->
+                val set = budgets.any { it.window == option.id }
+                GlassChip(option.label, option.id == w.id, leading = if (set) ({ Box(Modifier.size(6.dp).clip(CircleShape).background(t.accent)) }) else null) { windowId = option.id }
+            }
+        }
         SettingToggle("Budget", if (budget == null) "Keep ${w.label.lowercase()} under a limit you choose" else null, budget != null) { on ->
             onChange(if (on) Budget("", w.id, limit.roundToInt(), null) else null)
         }
@@ -169,10 +187,23 @@ import kotlin.math.roundToInt
     } }
 }
 
-/** The provider's accent: tints its card, charts and the ambient light. */
-@Composable private fun AccentCard(p: Provider, onAccent: (Int?) -> Unit) {
+/** The provider's name on your dock and its accent, which tints its card, charts and the ambient light. Both sync with the PC. */
+@Composable private fun AccentCard(p: Provider, onAccent: (Int?) -> Unit, customName: String?, onName: ((String?) -> Unit)?) {
     val t = LocalTokens.current; val current = LocalAccent.current(p.id).toArgb(); val haptics = LocalHapticFeedback.current
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+        if (onName != null) {
+            CardTitle(Icons.Outlined.Edit, "Name")
+            var text by remember(p.id, customName) { mutableStateOf(customName ?: "") }
+            val focus = androidx.compose.ui.platform.LocalFocusManager.current
+            fun commit() { val value = text.trim().take(18).ifBlank { null }; if (value != customName) onName(value); focus.clearFocus() }
+            OutlinedTextField(text, { text = it.filterNot { c -> c.isISOControl() }.take(18) }, singleLine = true, placeholder = { Text(p.name, color = t.faint) },
+                supportingText = { Text("Shown on your dock and widgets, here and on your PC", color = t.faint, fontSize = 11.sp) },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { commit() }),
+                trailingIcon = { if (text.trim() != (customName ?: "")) IconButton(onClick = { commit() }) { Icon(Icons.Outlined.Check, "Save name", tint = t.accent) } },
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = t.accent, unfocusedBorderColor = t.hairline, focusedTextColor = t.text, unfocusedTextColor = t.text, cursorColor = t.accent),
+                shape = com.kyant.shapes.RoundedRectangle(14.dp), modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp).semantics { contentDescription = "Name for ${p.name}" })
+        }
         CardTitle(Icons.Outlined.Palette, "Colour")
         Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             val defaultColor = Accents.default(p.id)
