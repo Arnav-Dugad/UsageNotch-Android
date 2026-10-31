@@ -87,8 +87,8 @@ class Repository(val context: Context) {
         val now = System.currentTimeMillis()
         check(cache.edit().clear().putString("snapshot", response).putLong("sync", now).putLong("checked", now).putString("source", source).commit())
         // Pairing with a PC that syncs settings: bring this phone's earlier budgets and colours along, then take the PC's.
-        if (parsed.has("settings")) SharedSettings.seed(prefs)
         SharedSettings.merge(prefs, parsed.shared)
+        if (parsed.has("settings")) SharedSettings.seed(prefs)
         if (source == "lan" && parsed.has("settings")) runCatching { pushSettings(adopted) }
     } }
     suspend fun disconnect() = withContext(Dispatchers.IO) { lock.withLock { vault.clear(); cache.edit().clear().commit() } }
