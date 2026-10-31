@@ -25,6 +25,10 @@ object WidgetRenderer {
         val snapshot: Snapshot?, val paired: Boolean, val status: String, val remaining: Boolean, val use24: Boolean,
         val now: Long, val dark: Boolean, val focus: Boolean, val focusId: String?, val offline: Boolean,
         val budgets: List<Budget> = emptyList(),
+        /** The tokens widget: today's local tokens instead of limits. */
+        val tokens: Boolean = false,
+        /** Classic style: a solid rounded body without the glass rim and sheen. */
+        val classic: Boolean = false,
     )
     /**
      * [refresh] says whether this layout left the top-right corner free for the refresh button. [countdownAt] is the
@@ -37,6 +41,9 @@ object WidgetRenderer {
     /** Glass body colours, matching res/drawable/widget_background*.xml, for previews in the app. */
     const val GLASS_DARK = 0xD6151922.toInt()
     const val GLASS_LIGHT = 0xE0FAFBFD.toInt()
+    /** Classic bodies, matching res/drawable/widget_background_classic*.xml. */
+    const val CLASSIC_DARK = 0xFF1C1C1E.toInt()
+    const val CLASSIC_LIGHT = 0xFFFFFFFF.toInt()
     const val CORNER_DP = 24f
     /** The refresh button's corner, in dp, which layouts keep clear. */
     const val REFRESH_DP = 34f
@@ -67,7 +74,8 @@ object WidgetRenderer {
         val d = density; val ink = Ink(input.dark)
         val providers = providers(input)
         val full = wDp >= 180 && hDp >= 170
-        glass(canvas, wDp, hDp, d, input.dark)
+        if (!input.classic) glass(canvas, wDp, hDp, d, input.dark)
+        if (input.tokens) return TokenWidget.draw(context, canvas, bitmap, wDp, hDp, d, input)
         // Small widgets open the app when tapped; from about 2×1 up, a refresh button sits in the top-right corner.
         val refresh = providers.isNotEmpty() && input.paired && (full || (wDp >= 130 && hDp >= 60) || (hDp >= 130 && wDp >= 60))
         // A live countdown to the next session reset along the bottom of larger widgets; the launcher ticks it each second.

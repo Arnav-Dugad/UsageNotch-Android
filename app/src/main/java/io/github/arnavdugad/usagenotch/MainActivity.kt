@@ -69,11 +69,14 @@ class MainActivity : ComponentActivity() {
             val repo = remember { Repository(this) }
             var appearance by remember { mutableStateOf(repo.appearance()) }
             var wallpaper by remember { mutableStateOf(repo.prefs.getBoolean("wallpaperColors", false)) }
-            NotchTheme(appearance, wallpaper) { NotchApp(incoming, { incoming = null }, link, { link = null }, appearance, { appearance = it }, wallpaper) { wallpaper = it } }
+            var style by remember { mutableStateOf(UiStyle.of(repo.prefs.getString("uiStyle", null))) }
+            NotchTheme(appearance, wallpaper, style) { NotchApp(incoming, { incoming = null }, link, { link = null }, appearance, { appearance = it }, wallpaper, { wallpaper = it }, style) { style = it } }
         }
         // Surviving the first seconds clears the startup-crash counter used for safe mode.
         window.decorView.postDelayed({ CrashLog.settled(this) }, 8_000)
     }
+    override fun onStart() { super.onStart(); Updates.foreground = true }
+    override fun onStop() { Updates.foreground = false; super.onStop() }
     private fun accept(intent: Intent?) {
         val data = intent?.data
         when {
@@ -117,6 +120,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     incoming: Uri? = null, incomingHandled: () -> Unit = {}, link: String? = null, linkHandled: () -> Unit = {},
     appearance: String = "system", appearanceChanged: (String) -> Unit = {},
     wallpaper: Boolean = false, wallpaperChanged: (Boolean) -> Unit = {},
+    style: UiStyle = UiStyle.Glass, styleChanged: (UiStyle) -> Unit = {},
 ) {
     val context = LocalContext.current; val repo = remember { Repository(context) }; val scope = rememberCoroutineScope(); val t = LocalTokens.current
     var snapshot by remember { mutableStateOf(repo.snapshot()) }; var pairing by remember { mutableStateOf(repo.pairing()) }
@@ -127,6 +131,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     var reduced by remember { mutableStateOf(repo.reduceMotion()) }; var disconnect by remember { mutableStateOf(false) }
     var alerts by remember { mutableStateOf(ResetAlerts.enabled(context) && ResetAlerts.canNotify(context)) }
     var checkUpdates by remember { mutableStateOf(Updates.enabled(context)) }; var update by remember { mutableStateOf(Updates.available(context)) }
+    var autoUpdate by remember { mutableStateOf(Updates.automatic(context)) }
     var crash by remember { mutableStateOf(CrashLog.report(context)) }; var pasting by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pairing?>(null) }; var confirmText by remember { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
@@ -160,7 +165,8 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
         quiet = Triple(AlertPrefs.quietOn(repo.prefs), AlertPrefs.quietStart(repo.prefs), AlertPrefs.quietEnd(repo.prefs))
     }
     fun afterSync() { reload(); afterNewData(context) }
-    fun refresh() { if (!busy) scope.launch { busy = true; refreshing = true; try { repo.refresh(explicit = true) } catch (_: Exception) { } finally { afterSync(); refreshNote = repo.refreshNote(); busy = false; refreshing = false } } }
+    val haptics = rememberHaptics(reduced)
+    fun refresh() { if (!busy) scope.launch { busy = true; refreshing = true; var ok = false; try { repo.refresh(explicit = true); ok = true } catch (_: Exception) { } finally { afterSync(); refreshNote = repo.refreshNote(); busy = false; refreshing = false; if (ok) haptics.confirm() } } }
     /** After a change to a synced setting: send it to the PC now if it's on this network; otherwise it waits. */
     fun syncSoon() { reload(); scope.launch { try { repo.syncSettings() } catch (_: Exception) { }; pendingSettings = repo.pendingSettings() } }
     fun importPairing(read: suspend () -> String) {
@@ -213,6 +219,19 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     fun save(key: String, value: Boolean) { repo.prefs.edit().putBoolean(key, value).apply(); runCatching { updateWidgets(context) } }
     val shown = if (demo) remember { demoSnapshot() } else snapshot
     val providers = shown?.providers.orEmpty()
+    // Feel it when something happens while you watch: a limit crossing your warning or urgent level, or renewing.
+    val levelsNow = providers.associate { p -> p.id to (p.sessionWindow()?.takeIf { !it.resetPassed(now) }?.let { Haptics.level(it.used, levels.first, levels.second) } ?: 0) }
+    val renewedNow = providers.filter { it.sessionWindow()?.resetPassed(now) == true }.map { it.id }.toSet()
+    var seenLevels by remember { mutableStateOf<Map<String, Int>?>(null) }; var seenRenewed by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(levelsNow) {
+        val before = seenLevels
+        if (before != null) levelsNow.entries.maxOfOrNull { (id, level) -> if (level > (before[id] ?: level)) level else 0 }?.takeIf { it > 0 }?.let { haptics.warning(urgent = it == 2) }
+        seenLevels = levelsNow
+    }
+    LaunchedEffect(renewedNow) {
+        if (seenRenewed?.let { (renewedNow - it).isNotEmpty() } == true) haptics.renewed()
+        seenRenewed = renewedNow
+    }
     val connected = pairing != null && !demo
     val offlineNotice = connected && offline && error.isBlank() && snapshot != null
     // Items above the dock on Overview, so the floating dock knows when the real one has scrolled away.
@@ -240,7 +259,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     val floating by remember { derivedStateOf { listState.firstVisibleItemIndex > leading } }
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-    CompositionLocalProvider(LocalAccent provides accentOf) {
+    CompositionLocalProvider(LocalAccent provides accentOf, LocalHaptics provides haptics) {
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().layerBackdrop(screen)) {
             AmbientBackground(providers.take(3).map { accentOf(it.id) }, animate = !reduced, modifier = Modifier.layerBackdrop(ambient))
@@ -282,7 +301,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                 indicator = { PullToRefreshDefaults.Indicator(state = pullState, isRefreshing = refreshing, modifier = Modifier.align(Alignment.TopCenter).padding(top = top)) }) {
                                 LazyColumn(Modifier.fillMaxSize(), state = pageStates[current], contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     crash?.let { report -> item(key = "crash") { Notice("UsageNotch closed unexpectedly", "Share the crash report to help fix it. It has no usage or pairing data.", "Share", "Dismiss", { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, report), "Share crash report")) }) { CrashLog.clear(context); crash = null } } }
-                                    update?.let { version -> item(key = "update") { Notice("UsageNotch $version is available", null, "Download", tone = t.accent, clicked = { openUrl(Updates.RELEASES) }) } }
+                                    update?.let { version -> item(key = "update") { UpdateNotice(version, openUrl) } }
                                     // In sample mode the top capsule says so and offers Exit; other tabs get a short notice.
                                     if (demo && current != 0) item(key = "demo") { Notice("Sample data", null, "Exit preview", clicked = { demo = false }, tone = Color(0xFF8FB6FF)) }
                                     if (pairError.isNotBlank() && !pasting) item(key = "pairError") { Notice("Pairing didn't finish", pairError, "Dismiss", clicked = { pairError = "" }) }
@@ -312,6 +331,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                             item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                                 GlassButton({ pinWidget(context, false) }, Modifier.weight(1f), prominent = true) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Overview", fontWeight = FontWeight.SemiBold) }
                                                 GlassButton({ pinWidget(context, true) }, Modifier.weight(1f)) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Focus", fontWeight = FontWeight.SemiBold) }
+                                                GlassButton({ pinWidget(context, false, tokens = true) }, Modifier.weight(1f)) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Tokens", fontWeight = FontWeight.SemiBold) }
                                             } }
                                             item { QuickTileCard() }
                                         }
@@ -322,7 +342,9 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                             liveUpdate, usageAlerts, alerts, recap, { key, on -> setNotify(key, on) },
                                             snapshot?.providers.orEmpty(), followed, { id -> followed = id; repo.prefs.edit().putString("liveProvider", id).apply(); LiveUpdate.update(context); UsageTileService.refresh(context) },
                                             remaining, { remaining = it; save("remaining", it) }, clock24, { clock24 = it; save("clock24", it) }, reduced, { reduced = it; save("reduceMotion", it) },
-                                            checkUpdates, { checkUpdates = it; save("checkUpdates", it); update = Updates.available(context) }, reducedMotion = reduced, openUrl = openUrl,
+                                            checkUpdates, { checkUpdates = it; save("checkUpdates", it); update = Updates.available(context); Updates.schedule(context) }, reducedMotion = reduced, openUrl = openUrl,
+                                            style = style, setStyle = { next -> repo.prefs.edit().putString("uiStyle", next.key).apply(); styleChanged(next); runCatching { updateWidgets(context) } },
+                                            autoUpdate = autoUpdate, setAutoUpdate = { autoUpdate = it; Updates.setAutomatic(context, it) }, update = update,
                                             extras = SettingsExtras(preReset, goodMoment, levels.first, levels.second, quiet.first, quiet.second, quiet.third,
                                                 syncLine = if (snapshot?.has("settings") == true && pairing != null) (if (pendingSettings > 0) "Settings sync · $pendingSettings ${if (pendingSettings == 1) "change waits" else "changes wait"} for your PC's Wi-Fi" else "Budgets, colours, names and alerts sync with ${pairing?.name}") else null,
                                                 providers = snapshot?.providers.orEmpty(),
@@ -428,6 +450,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     providers: List<Provider>, followed: String?, follow: (String) -> Unit,
     remaining: Boolean, setRemaining: (Boolean) -> Unit, clock24: Boolean, setClock24: (Boolean) -> Unit, reduced: Boolean, setReduced: (Boolean) -> Unit,
     checkUpdates: Boolean, setCheckUpdates: (Boolean) -> Unit, reducedMotion: Boolean, openUrl: (String) -> Unit,
+    style: UiStyle, setStyle: (UiStyle) -> Unit, autoUpdate: Boolean, setAutoUpdate: (Boolean) -> Unit, update: String?,
     extras: SettingsExtras,
 ) {
     item { Group {
@@ -451,6 +474,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     item { SectionLabel("Appearance") }
     item { Group {
         Column(Modifier.padding(vertical = 12.dp)) {
+            Text("Style", fontSize = 13.sp, color = LocalTokens.current.muted, modifier = Modifier.padding(bottom = 8.dp))
+            GlassSegmented(listOf("Liquid glass", "Classic"), if (style == UiStyle.Classic) 1 else 0, { setStyle(if (it == 1) UiStyle.Classic else UiStyle.Glass) }, Modifier.fillMaxWidth(), reducedMotion,
+                listOf("Liquid glass style", "Classic style"))
+            Text(if (style == UiStyle.Classic) "Solid cards on a grouped background, frosted bars and no refraction." else "Surfaces sample, bend and blur what's behind them.", fontSize = 12.sp, color = LocalTokens.current.faint, modifier = Modifier.padding(top = 6.dp, bottom = 14.dp))
+            Text("Theme", fontSize = 13.sp, color = LocalTokens.current.muted, modifier = Modifier.padding(bottom = 8.dp))
             GlassSegmented(listOf("System", "Light", "Dark"), listOf("system", "light", "dark").indexOf(appearance).coerceAtLeast(0), { setAppearance(listOf("system", "light", "dark")[it]) }, Modifier.fillMaxWidth(), reducedMotion,
                 listOf("System theme", "Light theme", "Dark theme"))
             if (Build.VERSION.SDK_INT >= 31) SettingToggle("Wallpaper colors", null, wallpaper, setWallpaper)
@@ -490,14 +518,58 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
         SettingToggle("24-hour clock", null, clock24, setClock24)
         Divider()
         SettingToggle("Reduce motion", null, reduced, setReduced)
-        Divider()
+    } }
+    item { SectionLabel("Updates") }
+    item { Group {
         SettingToggle("Check for updates", null, checkUpdates, setCheckUpdates)
+        if (checkUpdates) { Divider(); SettingToggle("Install updates automatically", "Downloads on Wi-Fi, checks the published checksum and signature, then installs", autoUpdate, setAutoUpdate) }
+        Divider()
+        UpdateRow(update)
     } }
     item { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text("UsageNotch ${BuildConfig.VERSION_NAME}", color = LocalTokens.current.faint, fontSize = 12.sp)
         TextButton(onClick = { openUrl(Updates.RELEASES) }) { Text("Downloads", color = LocalTokens.current.muted) }
     } }
 }
+/** The Update button with download progress, or the current version and a manual check. */
+@Composable private fun UpdateRow(update: String?) {
+    val t = LocalTokens.current; val context = LocalContext.current; val scope = rememberCoroutineScope()
+    Column(Modifier.padding(vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(if (update != null) "UsageNotch $update is available" else "UsageNotch ${BuildConfig.VERSION_NAME}", fontSize = 15.5.sp, color = t.text)
+                Text(Updates.message.ifBlank { if (update != null) "You have ${BuildConfig.VERSION_NAME}" else "Tap Check to look for a new version" }, fontSize = 12.sp, color = t.faint)
+            }
+            GlassButton({ Updates.updateNow(context, scope) }, prominent = update != null, enabled = Updates.progress == null, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
+                Text(if (update != null) "Update" else "Check", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+        }
+        Updates.progress?.let { LinearProgressIndicator({ it }, Modifier.fillMaxWidth().padding(top = 10.dp).clip(CircleShape), color = t.accent, trackColor = t.track) }
+        if (update != null && !Updates.canInstall(context)) TextButton(onClick = { runCatching { context.startActivity(Updates.allowInstallsIntent(context)) } }, contentPadding = PaddingValues(0.dp)) {
+            Text("Allow UsageNotch to install updates", color = t.accent, fontSize = 13.sp)
+        }
+    }
+}
+
+/** The Overview banner for a new version: install it here, with progress, or read about it. */
+@Composable private fun UpdateNotice(version: String, openUrl: (String) -> Unit) {
+    val t = LocalTokens.current; val context = LocalContext.current; val scope = rememberCoroutineScope()
+    Panel(Modifier.fillMaxWidth(), tint = t.accent.copy(alpha = .4f)) { Column(Modifier.padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.SystemUpdate, null, tint = t.accent, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("UsageNotch $version is available", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = t.text)
+                Text(Updates.message.ifBlank { "Checked against the published release before it installs." }, fontSize = 12.sp, color = t.muted)
+            }
+        }
+        Updates.progress?.let { LinearProgressIndicator({ it }, Modifier.fillMaxWidth().padding(top = 12.dp).clip(CircleShape), color = t.accent, trackColor = t.track) }
+        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassButton({ Updates.updateNow(context, scope) }, Modifier.weight(1f), prominent = true, enabled = Updates.progress == null) { Text(if (Updates.progress != null) "Updating…" else "Update to $version", fontWeight = FontWeight.SemiBold) }
+            GlassButton({ openUrl(Updates.RELEASES) }) { Text("What's new") }
+        }
+    } }
+}
+
 /** Settings that arrived with protocol 2: reminders, alert levels, quiet hours and the provider order (all but reminders sync with the PC). */
 class SettingsExtras(
     val preReset: Boolean, val goodMoment: Boolean, val warn: Int, val critical: Int, val quietOn: Boolean, val quietStart: Int, val quietEnd: Int,
@@ -590,9 +662,10 @@ internal object PhoneNames { fun of(id: String) = when (providerKind(id)) { "cla
         }
     }
 }
-private fun pinWidget(context: Context, focus: Boolean) {
+private fun pinWidget(context: Context, focus: Boolean, tokens: Boolean = false) {
     val manager = AppWidgetManager.getInstance(context)
-    val pinned = runCatching { manager != null && manager.isRequestPinAppWidgetSupported && manager.requestPinAppWidget(ComponentName(context, if (focus) FocusWidget::class.java else UsageWidget::class.java), null, null) }.getOrDefault(false)
+    val cls = when { tokens -> TokensWidget::class.java; focus -> FocusWidget::class.java; else -> UsageWidget::class.java }
+    val pinned = runCatching { manager != null && manager.isRequestPinAppWidgetSupported && manager.requestPinAppWidget(ComponentName(context, cls), null, null) }.getOrDefault(false)
     if (!pinned) android.widget.Toast.makeText(context, "Long-press Home → Widgets → UsageNotch", android.widget.Toast.LENGTH_LONG).show()
 }
 internal fun demoSnapshot(): Snapshot {

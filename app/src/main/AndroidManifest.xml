@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- The in-app QR scanner. Asked for only when you tap Scan QR code; frames are decoded on the phone and never stored. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Installs a verified UsageNotch update (same signature, newer version) through Android's package installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <application android:name=".NotchApplication" android:label="UsageNotch" android:icon="@mipmap/ic_launcher" android:enableOnBackInvokedCallback="true" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:usesCleartextTraffic="false" android:theme="@style/AppTheme" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
@@ -44,7 +46,17 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/focus_widget" />
         </receiver>
+        <receiver android:name=".TokensWidget" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/tokens_widget" />
+        </receiver>
         <receiver android:name=".ResetAlertReceiver" android:exported="false" />
+        <receiver android:name=".UpdateInstallReceiver" android:exported="false" />
+        <service android:name=".UpdateJobService" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
+        <!-- Shares the "your week" image without any storage permission. -->
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="io.github.arnavdugad.usagenotch.share" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/share_paths" />
+        </provider>
         <receiver android:name=".RecapReceiver" android:exported="false" />
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <!-- Exported only for these system-protected broadcasts, which other apps cannot send. -->

@@ -9,4 +9,5 @@
     <string name="widget_refreshing">Refreshing</string>
     <string name="widget_description">Claude, Codex and your other AI usage windows, kept distinct. Tap refresh for the latest reading.</string>
     <string name="focus_widget_description">One AI provider in focus, with its first two usage windows.</string>
+    <string name="tokens_widget_description">Tokens used today by Claude Code or Codex on your PC, with the top project and a 7-day sparkline.</string>
 </resources>

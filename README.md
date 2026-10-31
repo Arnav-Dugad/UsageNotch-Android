@@ -6,12 +6,12 @@ Your Claude, Codex, Gemini and Cursor usage limits on your phone, in liquid glas
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.5.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.6.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
 | **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar, 2.6 for settings sync, Stats and tokens), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
 
-The APK is sideloaded, not from the Play Store. When you open it, Android asks you to allow installs from your browser or file manager. Updates install over it, and the app tells you when one is available. If an earlier version closed immediately on your phone, install 1.4.0: the 1.0.x startup crash was fixed in 1.1.
+The APK is sideloaded, not from the Play Store. When you open it, Android asks you to allow installs from your browser or file manager. After that the app updates itself: it downloads each new release from GitHub, checks it against the published checksum and its own signature, and installs it (Android asks you to confirm the first time). If an earlier version closed immediately on your phone, install 1.4.0: the 1.0.x startup crash was fixed in 1.1.
 
 <p>
 <img src="docs/images/phone-overview.png" width="220" alt="Overview in liquid glass: a floating status capsule, a glass dock of rings with Claude, Codex and Gemini logos, then Claude's glass card, over soft coloured light, with a floating glass tab bar" />
@@ -44,10 +44,16 @@ Add them from the **Widgets** tab or your launcher's widget list, then resize fr
 - **A row or a column**: the desktop dock, with each provider's ring, percentage and "7d" weekly figure.
 - **Larger**: the rings plus each limit's colour-graded bar and reset time.
 - **Focus widget**: one provider with a big dual ring (outer: session, inner: weekly). Long-press it to choose the provider.
+- **Tokens widget**: what Claude Code (or Codex) used today on your PC, the API-price equivalent, the top project and a 7-day sparkline. Long-press it to choose the tool. Needs UsageNotch for Windows 2.6.
 
-Widgets are glass too: a translucent body that lets your wallpaper through, with a specular rim. From about 2×1 up, the refresh button in the corner updates straight from your PC with a spinner; 1×1 opens the app. Rings use the desktop's exact colour ramp (green → amber → red as a limit fills), a hairline for the time left before the reset, your budget mark, and the real Claude, OpenAI, Gemini and Cursor marks. Widgets follow your Light/Dark choice.
+Widgets are glass too: a translucent body that lets your wallpaper through, with a specular rim. From about 2×1 up, the refresh button in the corner updates straight from your PC with a spinner; 1×1 opens the app. Rings use the desktop's exact colour ramp (green → amber → red as a limit fills), a hairline for the time left before the reset, your budget mark, and the real Claude, OpenAI, Gemini and Cursor marks. Widgets follow your Light/Dark choice and your style: in Classic they have a solid rounded body.
 
 ## What you get
+
+- **Two styles**: Liquid glass, or **Classic**, the calm grouped look of iOS settings: solid cards on a grouped background, continuous corners, hairline separators and frosted (blur only) floating bars. Settings → Appearance → Style; it switches instantly.
+- **Updates itself** from GitHub Releases: on Wi-Fi in the background, or with the Update button. Every download must come from GitHub, match the release's SHA-256, be a newer version and carry the same signature as the installed app.
+- **Share your week** from History: a story-sized image of your rings, each provider's week, your busiest day, streak and (with Windows 2.6) tokens and top project. No account names.
+- **Haptics that mean something**: a confirming tick when a refresh finishes, a firmer pattern when a limit crosses your warning level while you watch, and a celebratory double tap when one renews. Reduce motion turns them off.
 
 - **Liquid glass**, after iOS: cards, the floating tab bar and controls sample what's behind them, bend it at their edges (Android 13+), blur and saturate it (Android 12+), and catch the light on a specular rim. Soft coloured light drifts behind, tinted by your providers. The tab bar's selection is a drop of glass that glides, stretches and can be dragged between tabs. Older Android versions get the same shapes with a denser tint.
 - Clean and quiet: no taglines, just your PC's status in a floating capsule that springs open into a mini dock when you scroll.

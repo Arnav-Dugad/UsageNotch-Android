@@ -46,7 +46,7 @@ private const val HOUR_MS = 3_600_000L
  * reading under your finger. Drag to scrub (with light haptic ticks); pinch with two fingers to zoom into a stretch.
  */
 @Composable fun ChartExplorer(p: Provider, window: UsageWindow, clock24: Boolean, reduced: Boolean, now: Long, budget: Budget? = null) {
-    val t = LocalTokens.current; val haptics = LocalHapticFeedback.current; val accent = LocalAccent.current(p.id)
+    val t = LocalTokens.current; val haptics = LocalHapticFeedback.current; val scrub = LocalHaptics.current; val accent = LocalAccent.current(p.id)
     val history = p.history.firstOrNull { it.window == window.id }
     val trend = history?.trend.orEmpty()
     var week by rememberSaveable(window.id) { mutableStateOf(false) }
@@ -98,7 +98,7 @@ private const val HOUR_MS = 3_600_000L
         Canvas(Modifier.fillMaxWidth().height(170.dp)
             .pointerInput(points, showWeek) {
                 fun nearest(px: Float): Int { val at = view.first + (px / size.width).coerceIn(0f, 1f) * (view.second - view.first); return points.indices.minBy { abs(points[it].at - at) } }
-                fun pick(px: Float) { val i = nearest(px); if (i != selected) { selected = i; haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) } }
+                fun pick(px: Float) { val i = nearest(px); if (i != selected) { selected = i; scrub.tick() } }
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     pick(down.position.x)

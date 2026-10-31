@@ -1,0 +1,2 @@
+<!-- Classic style: a solid elevated body, like an iOS widget. Keep in sync with WidgetRenderer.CLASSIC_DARK. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#FF1C1C1E" /><corners android:radius="24dp" /></shape>

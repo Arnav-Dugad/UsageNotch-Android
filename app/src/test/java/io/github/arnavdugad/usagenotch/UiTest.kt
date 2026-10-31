@@ -139,8 +139,9 @@ class UiTest {
         compose.setContent { NotchTheme("dark") { NotchApp() } }
         compose.onNodeWithText("Scan QR code").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Settings").performClick()
-        scrollTo("24-hour clock"); compose.onNodeWithContentDescription("24-hour clock").performClick().assertIsOn()
-        scrollTo("Reduce motion"); compose.onNodeWithContentDescription("Reduce motion").performClick().assertIsOn()
+        // Scroll past the rows so the floating tab bar doesn't cover them.
+        scrollTo("Install updates automatically"); compose.onNodeWithContentDescription("24-hour clock").performClick().assertIsOn()
+        compose.onNodeWithContentDescription("Reduce motion").performClick().assertIsOn()
         scrollTo("Reset alerts"); compose.onNodeWithContentDescription("Reset alerts").assertIsOff()
         screenshot("05-small-screen-settings")
     }

@@ -220,7 +220,7 @@ import kotlin.math.roundToInt
 
 /** The 24-hour line with a crosshair: drag to read any reading, with a light haptic tick as it moves between readings. */
 @Composable fun ScrubChart(window: UsageWindow, clock24: Boolean) {
-    val t = LocalTokens.current; val haptics = LocalHapticFeedback.current
+    val t = LocalTokens.current; val scrub = LocalHaptics.current
     val points = window.points
     if (points.size < 2) { Text("Readings appear here as your PC records them.", fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(vertical = 12.dp)); return }
     val line = Color(Palette.usage(window.used))
@@ -230,7 +230,7 @@ import kotlin.math.roundToInt
         val at = start + (x / width).coerceIn(0f, 1f) * span
         return points.indices.minBy { abs(points[it].at - at) }
     }
-    fun pick(index: Int) { if (index != selected) { selected = index; haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) } }
+    fun pick(index: Int) { if (index != selected) { selected = index; scrub.tick() } }
     Column {
         Box(Modifier.fillMaxWidth().height(22.dp)) {
             val r = selected?.let { points[it] }

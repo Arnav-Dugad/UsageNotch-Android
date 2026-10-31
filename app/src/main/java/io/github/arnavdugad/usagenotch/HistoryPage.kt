@@ -35,6 +35,7 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 private val WEEKDAYS = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
 private fun pct(v: Double) = "${(v * 100).roundToInt()}%"
@@ -68,6 +69,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
     val history = provider.history.firstOrNull { it.window == state.window } ?: provider.history.first()
     item(key = "h-pickers") { HistoryPickers(withHistory, provider, history, state, reduced) }
     item(key = "h-summary") { SummaryTiles(history, state.days) }
+    item(key = "h-share") { ShareWeekButton(providers, tokens) }
     item(key = "h-bars") { DailyBars(provider, history, state.days, reduced, openDay, onDay) }
     item(key = "h-calendar") { CalendarCard(provider, history, openDay, onDay) }
     if (withHistory.size > 1) item(key = "h-compare") { CompareCard(withHistory, state.days, reduced) }
@@ -375,5 +377,25 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
         Text(label, fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f), maxLines = 1)
         Text(value, fontSize = 14.sp, color = t.text, fontWeight = FontWeight.SemiBold)
         note?.let { Text("  $it", fontSize = 12.sp, color = t.faint) }
+    }
+}
+
+/** Renders "your week" as a story image in the current style and opens the share sheet. */
+@Composable private fun ShareWeekButton(providers: List<Provider>, tokens: TokenUsage?) {
+    val context = androidx.compose.ui.platform.LocalContext.current; val t = LocalTokens.current
+    val classic = LocalStyle.current == UiStyle.Classic; val accent = LocalAccent.current
+    val scope = rememberCoroutineScope(); var busy by remember { mutableStateOf(false) }
+    GlassButton({
+        if (!busy) scope.launch {
+            busy = true
+            try {
+                val remaining = Repository(context).remaining(); val now = System.currentTimeMillis()
+                val image = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ShareCard.render(context, providers, tokens, remaining, now, t.dark, classic) { accent(it).toArgb() } }
+                ShareCard.share(context, image)
+            } catch (_: Exception) { } finally { busy = false }
+        }
+    }, Modifier.fillMaxWidth(), enabled = !busy) {
+        Icon(androidx.compose.material.icons.Icons.Outlined.IosShare, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+        Text(if (busy) "Preparing your week…" else "Share your week", fontWeight = FontWeight.SemiBold)
     }
 }

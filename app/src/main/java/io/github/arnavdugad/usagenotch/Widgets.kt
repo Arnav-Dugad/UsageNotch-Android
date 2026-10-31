@@ -37,6 +37,7 @@ class NotchApplication : Application() {
         // Background refresh is best effort; the dashboard never depends on it.
         runCatching { scheduleRefresh(this) }
         runCatching { ResetAlerts.schedule(this) }
+        runCatching { Updates.schedule(this) }
     }
 }
 private const val PERIODIC_JOB = 1
@@ -72,12 +73,13 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         runCatching { scheduleRefresh(context) }
+        runCatching { Updates.schedule(context) }
         afterNewData(context)
     }
 }
 open class UsageWidget : AppWidgetProvider() {
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { renderWidget(context, manager, it, this is FocusWidget) }; requestRefresh(context) }
-    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) { renderWidget(context, manager, id, this is FocusWidget) }
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { renderWidget(context, manager, it, this is FocusWidget, this is TokensWidget) }; requestRefresh(context) }
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) { renderWidget(context, manager, id, this is FocusWidget, this is TokensWidget) }
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (intent.action != REFRESH_ACTION) return
@@ -105,15 +107,17 @@ open class UsageWidget : AppWidgetProvider() {
     companion object { const val REFRESH_ACTION = "io.github.arnavdugad.usagenotch.REFRESH"; internal const val REFRESHING = "widgetRefreshingUntil" }
 }
 class FocusWidget : UsageWidget()
+/** Today's tokens from Claude Code or Codex on your PC, with the API-price equivalent, top project and a 7-day sparkline. */
+class TokensWidget : UsageWidget()
 fun updateWidgets(context: Context) {
     val manager = AppWidgetManager.getInstance(context) ?: return
-    for (cls in listOf(UsageWidget::class.java, FocusWidget::class.java)) {
-        manager.getAppWidgetIds(ComponentName(context, cls)).forEach { renderWidget(context, manager, it, cls == FocusWidget::class.java) }
+    for (cls in listOf(UsageWidget::class.java, FocusWidget::class.java, TokensWidget::class.java)) {
+        manager.getAppWidgetIds(ComponentName(context, cls)).forEach { renderWidget(context, manager, it, cls == FocusWidget::class.java, cls == TokensWidget::class.java) }
     }
 }
-fun renderWidget(context: Context, manager: AppWidgetManager, id: Int, focus: Boolean) {
+fun renderWidget(context: Context, manager: AppWidgetManager, id: Int, focus: Boolean, tokens: Boolean = false) {
     // One unreadable widget must never take down the app or the other widgets.
-    runCatching { manager.updateAppWidget(id, buildWidgetViews(context, id, focus, manager.getAppWidgetOptions(id) ?: Bundle())) }
+    runCatching { manager.updateAppWidget(id, buildWidgetViews(context, id, focus, manager.getAppWidgetOptions(id) ?: Bundle(), tokens)) }
 }
 /** The provider a focus widget shows: the chosen one, or the first reported provider until one is chosen. */
 internal fun focusProvider(providers: List<Provider>, selected: String?) = providers.firstOrNull { it.id == selected } ?: providers.firstOrNull()
@@ -139,17 +143,18 @@ internal fun widgetSizes(context: Context, options: Bundle): List<SizeF> {
     val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
     return listOf(if (portrait) SizeF(minW.toFloat(), maxOf(minH, maxH).toFloat()) else SizeF(maxOf(minW, maxW).toFloat(), minH.toFloat()))
 }
-internal fun widgetInput(context: Context, id: Int, focus: Boolean): WidgetRenderer.Input {
+internal fun widgetInput(context: Context, id: Int, focus: Boolean, tokens: Boolean = false): WidgetRenderer.Input {
     val repo = Repository(context); val snapshot = repo.snapshot(); val now = System.currentTimeMillis()
     return WidgetRenderer.Input(snapshot, repo.pairing() != null, widgetStatus(repo, snapshot, now), repo.remaining(), repo.use24(), now,
-        darkFor(context, repo.appearance()), focus, repo.prefs.getString("widget-$id", null), repo.offline(), Budgets.all(repo.prefs))
+        darkFor(context, repo.appearance()), focus, repo.prefs.getString("widget-$id", null), repo.offline(), Budgets.all(repo.prefs),
+        tokens = tokens, classic = UiStyle.of(repo.prefs.getString("uiStyle", null)) == UiStyle.Classic)
 }
-internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options: Bundle = Bundle()): RemoteViews {
-    val input = widgetInput(context, id, focus)
+internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options: Bundle = Bundle(), tokens: Boolean = false): RemoteViews {
+    val input = widgetInput(context, id, focus, tokens)
     val refreshing = Repository(context).prefs.getLong(UsageWidget.REFRESHING, 0L) > System.currentTimeMillis()
     val density = context.resources.displayMetrics.density
     val open = PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-    val refresh = PendingIntent.getBroadcast(context, id, Intent(context, if (focus) FocusWidget::class.java else UsageWidget::class.java).setAction(UsageWidget.REFRESH_ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    val refresh = PendingIntent.getBroadcast(context, id, Intent(context, when { tokens -> TokensWidget::class.java; focus -> FocusWidget::class.java; else -> UsageWidget::class.java }).setAction(UsageWidget.REFRESH_ACTION), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val sizes = widgetSizes(context, options)
     // Launchers cap a widget's total bitmap memory at about 1.5 screens; share a safe part of that across sizes.
     val metrics = context.resources.displayMetrics
@@ -157,7 +162,9 @@ internal fun buildWidgetViews(context: Context, id: Int, focus: Boolean, options
     fun views(size: SizeF): RemoteViews {
         val out = WidgetRenderer.render(context, WidgetRenderer.Frame(size.width, size.height, density, budget), input)
         return RemoteViews(context.packageName, R.layout.usage_widget).apply {
-            setInt(R.id.widget_root, "setBackgroundResource", if (input.dark) R.drawable.widget_background else R.drawable.widget_background_light)
+            setInt(R.id.widget_root, "setBackgroundResource", when {
+                input.classic && input.dark -> R.drawable.widget_background_classic; input.classic -> R.drawable.widget_background_classic_light
+                input.dark -> R.drawable.widget_background; else -> R.drawable.widget_background_light })
             setImageViewBitmap(R.id.widget_image, out.bitmap)
             setContentDescription(R.id.widget_image, out.description)
             setViewVisibility(R.id.widget_refresh, if (out.refresh && !refreshing) View.VISIBLE else View.GONE)
@@ -181,21 +188,25 @@ class WidgetConfigurationActivity : ComponentActivity() {
         setResult(RESULT_CANCELED)
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         if (id == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
-        val providers = Repository(this).snapshot()?.providers.orEmpty()
+        val tokens = AppWidgetManager.getInstance(this)?.getAppWidgetInfo(id)?.provider?.className == TokensWidget::class.java.name
+        val snapshot = Repository(this).snapshot()
+        // The focus widget picks a provider; the tokens widget picks a coding tool on your PC.
+        val choices = if (tokens) snapshot?.tokens?.sources.orEmpty().map { it.id to it.label } else snapshot?.providers.orEmpty().map { it.id to it.name }
         fun choose(providerId: String?) {
             Repository(this).prefs.edit().apply { if (providerId == null) remove("widget-$id") else putString("widget-$id", providerId) }.apply()
-            renderWidget(this, AppWidgetManager.getInstance(this), id, true)
+            renderWidget(this, AppWidgetManager.getInstance(this), id, !tokens, tokens)
             setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)); finish()
         }
-        setContent { NotchTheme(Repository(this).appearance()) {
+        val prefs = Repository(this).prefs
+        setContent { NotchTheme(Repository(this).appearance(), style = UiStyle.of(prefs.getString("uiStyle", null))) {
             Surface { Column(Modifier.fillMaxSize().systemBarsPadding().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Your focus widget", style = MaterialTheme.typography.headlineMedium)
-                Text("Choose one provider. Its usage windows stay separate.")
-                if (providers.isEmpty()) {
-                    Text("No readings yet. The widget will show your first provider once your PC is paired.")
+                Text(if (tokens) "Your tokens widget" else "Your focus widget", style = MaterialTheme.typography.headlineMedium)
+                Text(if (tokens) "Choose which coding tool on your PC it shows." else "Choose one provider. Its usage windows stay separate.")
+                if (choices.isEmpty()) {
+                    Text(if (tokens) "No token counts yet. They come from UsageNotch for Windows 2.6 (Settings → Data & privacy)." else "No readings yet. The widget will show your first provider once your PC is paired.")
                     Button(onClick = { choose(null) }, modifier = Modifier.fillMaxWidth()) { Text("Add widget") }
                 }
-                providers.forEach { p -> Button(onClick = { choose(p.id) }, modifier = Modifier.fillMaxWidth()) { Text(p.name) } }
+                choices.forEach { (choiceId, label) -> Button(onClick = { choose(choiceId) }, modifier = Modifier.fillMaxWidth()) { Text(label) } }
                 TextButton(onClick = { finish() }) { Text("Cancel") }
             } }
         } }
