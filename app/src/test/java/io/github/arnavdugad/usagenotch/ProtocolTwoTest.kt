@@ -50,6 +50,18 @@ class ProtocolTwoTest {
         assertFalse("unknown keys are ignored", "unknown:key" in shared)
         assertEquals("Work Claude", shared.getValue("name:claude:work").v)
     }
+    /** The snapshot UsageNotch for Windows 2.6 actually writes (Diagnostics --phone-check --fixtures). */
+    @Test fun realWindowsSnapshotParses() {
+        val s = Snapshot.parse(resource("phone-snapshot-v2-windows.json"))
+        assertEquals(2, s.protocol); assertTrue(s.has("refresh") && s.has("settings") && s.has("trend"))
+        val work = s.providers.first { it.id == "claude:work" }
+        assertEquals("claude", work.kind); assertEquals("Work", work.accountLabel)
+        assertEquals(60, (s.shared.getValue("budget:claude|five_hour").v as org.json.JSONObject).getInt("limit"))
+        assertEquals("#7A5CFF", s.shared.getValue("accent:claude").v)
+        assertEquals("minor", s.incidents.single().impact)
+        val h = s.providers.first { it.id == "claude" }.history.first()
+        assertTrue(h.trend.size >= 2); assertNotNull(h.reliability)
+    }
     @Test fun olderPcsStayProtocolOne() {
         val s = Snapshot.parse(resource("phone-snapshot-fixture.json"))
         assertEquals(1, s.protocol); assertTrue(s.features.isEmpty()); assertFalse(s.has("refresh"))

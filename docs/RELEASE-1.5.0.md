@@ -6,7 +6,7 @@ UsageNotch for Android 1.5.0 brings the desktop's Stats to your phone, keeps you
 - **More than one account.** A second Claude or Codex account on your PC shows as its own provider ("Codex · Work"), with its own budget and colour.
 
 **Stats from the desktop**
-- **Chart explorer** in each provider's view: 24 hours or 7 days, the pace as a dashed line with a soft band up to the reset, resets and events marked, and your budget as a level. Drag to read any moment, with haptic ticks. Pinch with two fingers to zoom.
+- **Chart explorer** in each provider's view: 24 hours or 7 days, the pace as a dashed line with a band of your observed slowest-to-fastest paces up to the reset, resets and events marked, and your budget as a level. Drag to read any moment, with haptic ticks. Pinch with two fingers to zoom.
 - **Tokens** in History: what Claude Code and Codex on your PC used today and this week, an API-price equivalent, 30 days of totals, and the top projects and models.
 - **Unused capacity**, **limits reached**, **reset reliability**, **work sessions** and **events** in History, for the limit you pick.
 - **Provider status**: incidents from the Claude, OpenAI and Cursor status pages appear on Overview and in the provider's view.

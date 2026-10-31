@@ -148,8 +148,13 @@ private const val HOUR_MS = 3_600_000L
                 if (rate != null && projectionEnd != null && projectionEnd > last.at) {
                     val endUsed = last.used + rate / 100.0 * (projectionEnd - last.at) / HOUR_MS
                     val a = Offset(x(last.at), y(last.used)); val b = Offset(x(projectionEnd), y(endUsed))
+                    // The band spans the observed 10th–90th percentile paces when the PC sends them (Windows 2.6), else a soft ±35%.
+                    val hours = (projectionEnd - last.at).toDouble() / HOUR_MS
+                    val low = window.forecast?.lowRate; val high = window.forecast?.highRate
                     val spread = ((endUsed - last.used) * .35).coerceAtLeast(.01)
-                    val fan = Path().apply { moveTo(a.x, a.y); lineTo(b.x, y(endUsed + spread)); lineTo(b.x, y((endUsed - spread).coerceAtLeast(last.used))); close() }
+                    val top = if (high != null) last.used + high / 100.0 * hours else endUsed + spread
+                    val bottom = if (low != null) last.used + low / 100.0 * hours else (endUsed - spread).coerceAtLeast(last.used)
+                    val fan = Path().apply { moveTo(a.x, a.y); lineTo(b.x, y(maxOf(top, endUsed))); lineTo(b.x, y(minOf(bottom, endUsed).coerceAtLeast(last.used))); close() }
                     drawPath(fan, forecastColor.copy(alpha = .16f))
                     drawLine(forecastColor, a, b, 1.8.dp.toPx(), StrokeCap.Round, dashed)
                 }

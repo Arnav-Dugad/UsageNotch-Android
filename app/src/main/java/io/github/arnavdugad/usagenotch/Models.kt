@@ -13,7 +13,9 @@ import kotlin.math.roundToInt
 
 data class Reading(val at: Long, val used: Double, val period: String)
 /** The desktop's usage-pace estimate: its own summary, the pace in percentage points per hour, and when the limit would be reached (if before the reset). */
-data class Forecast(val summary: String, val rate: Double?, val projected: Double?, val limitAt: Long?, val confidence: String)
+data class Forecast(val summary: String, val rate: Double?, val projected: Double?, val limitAt: Long?, val confidence: String,
+    /** The 10th and 90th percentile observed paces (percentage points per hour) from Windows 2.6: the explorer's band. */
+    val lowRate: Double? = null, val highRate: Double? = null)
 data class UsageWindow(
     val id: String, val label: String, val used: Double, val at: Long, val reset: Long?, val points: List<Reading>,
     val detail: String? = null, val usedAmount: Double? = null, val limitAmount: Double? = null, val unit: String? = null,
@@ -182,7 +184,8 @@ data class Snapshot(
                     UsageWindow(w.getString("id").take(100), w.getString("label").take(80), used, w.getLong("at"), w.time("reset"),
                         (0 until (points?.length() ?: 0)).map { n -> val r = points!!.getJSONObject(n); val u = r.getDouble("used"); require(u.isFinite() && u >= 0 && u <= 1000); Reading(r.getLong("at"), u, r.getString("period").take(80)) }.sortedBy { it.at },
                         w.text("detail", 160), w.number("usedAmount"), w.number("limitAmount"), w.text("unit", 12),
-                        w.optJSONObject("forecast")?.let { f -> Forecast(f.optString("summary").take(120), f.number("rate"), f.number("projected"), f.time("limitAt"), f.optString("confidence").take(60)) })
+                        w.optJSONObject("forecast")?.let { f -> Forecast(f.optString("summary").take(120), f.number("rate"), f.number("projected"), f.time("limitAt"), f.optString("confidence").take(60),
+                            f.number("lowRate")?.takeIf { it >= 0 }, f.number("highRate")?.takeIf { it >= 0 }) })
                 }, p.text("statusText", 400), p.text("account", 80), p.time("updatedAt"), https(p.text("manageUrl", 300)),
                     p.text("session", 100), p.text("weekly", 100),
                     (0 until (extras?.length() ?: 0)).map { n -> val e = extras!!.getJSONObject(n)
