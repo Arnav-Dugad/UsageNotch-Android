@@ -6,8 +6,8 @@ Your Claude, Codex, Gemini and Cursor usage limits on your phone, in liquid glas
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.4.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
-| **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.5.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar, 2.6 for settings sync, Stats and tokens), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
 
@@ -54,10 +54,16 @@ Widgets are glass too: a translucent body that lets your wallpaper through, with
 - Every provider on a glass card: each limit with its bar, local reset time and live countdown, the pace, and your budget.
 - **Full-screen provider view**: tap a ring and it grows into a large ring, with the pace, the best time to start, a budget, a 24-hour chart you can scrub (with light haptic ticks) and the provider's colour. The back gesture shrinks it away.
 - **Best time to start**: when to start a session so it renews in the middle of your usual busy hours, from your PC's history.
-- **Budgets**: keep a limit under, say, 60% by 6 PM. A tick marks it on the ring and bar; the app says when you're near it, on pace to pass it, or over it, and usage alerts can notify you.
-- **History tab**: 7 or 30 days of daily usage with bars that grow in as you scroll (tap one and it morphs into that day's card), total, daily average, busiest day, streak, a 90-day calendar, your providers side by side, and a weekday × hour map of your busiest times. Missing days and hours are shown as no data, never as zero. Needs Windows 2.4; the calendar covers 90 days from Windows 2.5.
+- **Settings in sync with your PC** (Windows 2.6): budgets, accent colours, provider names and order, alert levels and quiet hours chosen on either device appear on the other. Changes made away from home wait until the phone is on your PC's Wi-Fi; the newest change wins.
+- **Refresh that refreshes**: pulling down, the refresh button and a widget's ↻ ask your PC to read your providers again (Windows 2.6).
+- **Budgets for any limit**: keep the session, the week, Opus or Sonnet under, say, 60% by 6 PM. Ticks mark them on the outer and inner rings and on bars; the app says when you're near a budget, on pace to pass it, or over it, and usage alerts can notify you.
+- **Chart explorer**: 24 hours or 7 days of readings with the pace as a dashed estimate up to the reset, resets and events marked, your budget as a level. Drag to read any moment; pinch to zoom.
+- **More than one account**: a second Claude or Codex account on your PC appears as its own provider, such as "Codex · Work".
+- **Provider status**: incidents from the Claude, OpenAI and Cursor status pages, relayed by your PC.
+- **History tab**: 7 or 30 days of daily usage with bars that grow in as you scroll (tap one and it morphs into that day's card), total, daily average, busiest day, streak, a 90-day calendar, your providers side by side, and a weekday × hour map of your busiest times. Missing days and hours are shown as no data, never as zero. Needs Windows 2.4; the calendar covers 90 days from Windows 2.5. From Windows 2.6: tokens that Claude Code and Codex used (today, this week, 30 days, by project and model, with an API-price equivalent), unused capacity, limits reached, reset reliability, work sessions and events.
 - **Live countdown**: an ongoing notification with the percentage and a countdown to the reset, also on the lock screen. On Android 16 it's a Live Update with a status-bar chip.
-- **Usage alerts** at 80% and 95% used, and when the pace says a limit runs out within two hours before it resets. **Reset alerts** when a limit renews, with a gentle vibration.
+- **Usage alerts** at levels you choose (80% and 95% unless you change them), and when the pace says a limit runs out within two hours before it resets. **Reset alerts** when a limit renews, with a gentle vibration. **Before a limit renews**: 10 minutes ahead, for limits you've used half of. **Good moment to start**: when starting now renews mid-way through your busy hours. **Quiet hours** silence them all overnight, and nothing is replayed later.
+- **Live widget countdowns**: larger widgets count down to the next reset every second without waking your phone.
 - **Quick Settings tile** with the percentage; tap it to refresh. Add it from the Widgets tab.
 - **Weekly recap** on Sunday evening: your week's usage, busiest day and streak, from the history on your phone.
 - **Your colours**: pick an accent for each provider; it tints its card, charts and the ambient light. Rings keep the usage colours.
@@ -68,7 +74,7 @@ Widgets are glass too: a translucent body that lets your wallpaper through, with
 
 ## When your PC is off or you're away
 
-- **Everything keeps working offline.** Saved readings stay visible with their age, countdowns keep running, and the status reads *PC offline*.
+- **Everything keeps working offline.** Saved readings stay visible with their age, countdowns keep running, and the status reads *PC offline*. A dashed stretch of each bar and "≈ 46% used now · estimate" show where usage probably is, from your recent pace. It's always labelled as an estimate.
 - **Limits that reset show Renewed.** Widgets flip at the reset time. With Reset alerts on, your phone notifies you ("Claude limit renewed"). This works with the laptop shut down.
 - **Optional internet sync** gets readings on mobile data. In Windows 2.4 Settings → Phone, choose **Turn on internet sync**, click **Generate token** on the GitHub page that opens and copy the token. Your phone picks up the new settings by itself the next time it reaches your PC on Wi-Fi; there's no new code to scan. Each reading is encrypted on your PC (AES-256-GCM) and stored in a **secret gist in your own GitHub account**. Only your paired phone has the key. GitHub caches gist files for up to about five minutes.
 
@@ -76,7 +82,7 @@ A phone can't observe *new* usage while every PC running UsageNotch is off. Your
 
 ## Privacy and security
 
-- AI credentials and account identifiers never leave Windows. The phone receives percentages, limits, reset times, 24 hours of readings, 90 days of daily totals, 30 days of hourly totals, pace estimates, and the account display name only if the dock shows it.
+- AI credentials and account identifiers never leave Windows. The phone receives percentages, limits, reset times, 24 hours of readings, 90 days of daily totals, 30 days of hourly totals, 7 days of readings, pace estimates, the account display name only if the dock shows it, and (Windows 2.6) token totals with project folder names (never paths) and status-page incidents. Settings sync carries only budgets, colours, names, order, alert levels and quiet hours.
 - Wi-Fi pairing uses HTTPS pinned to your PC's own certificate plus a random 256-bit key. Plain HTTP, redirects and public addresses are rejected. The pairing is encrypted with Android Keystore and excluded from backups.
 - The QR code keeps its pairing in the part of the web address browsers never send to a server. The pairing page removes it from the address bar immediately.
 - The QR scanner runs inside the app (ZXing). It asks for the camera only when you open it; frames are analysed in memory and never saved or sent anywhere. Screenshots are chosen with Android's photo picker, so the app never gets access to your other photos.
