@@ -42,13 +42,13 @@ import kotlin.math.sin
 }
 
 /** A glass card. A [color] gives a flat inner surface instead, for elements that sit inside another glass card. */
-@Composable fun Panel(modifier: Modifier = Modifier, radius: Dp = 26.dp, color: Color? = null, tint: Color = Color.Unspecified, content: @Composable () -> Unit) {
-    val shape = com.kyant.shapes.RoundedRectangle(radius)
+@Composable fun Panel(modifier: Modifier = Modifier, radius: Dp = Dp.Unspecified, color: Color? = null, tint: Color = Color.Unspecified, content: @Composable () -> Unit) {
+    val shape = com.kyant.shapes.RoundedRectangle(if (radius == Dp.Unspecified) cardRadius(LocalStyle.current) else radius)
     if (color != null) Box(modifier.clip(shape).background(color)) { content() }
     else GlassPanel(modifier, shape, tint = tint) { content() }
 }
 /** Surface for elements inside a glass card. */
-@Composable fun innerSurface(): Color = if (LocalTokens.current.dark) Color(0x0FFFFFFF) else Color(0x0D000000)
+@Composable fun innerSurface(): Color = if (LocalStyle.current == UiStyle.Classic) ClassicFills.inner(LocalTokens.current.dark) else if (LocalTokens.current.dark) Color(0x0FFFFFFF) else Color(0x0D000000)
 
 /**
  * Numbers that roll digit by digit when they change: each changed digit slides up when the value grows and down when
@@ -103,7 +103,8 @@ val LocalRingShare = staticCompositionLocalOf<(@Composable (String) -> Modifier)
     var wasRenewed by remember { mutableStateOf(renewed) }
     val burst = remember { Animatable(1f) }
     LaunchedEffect(renewed) {
-        if (renewed && !wasRenewed && !reduced) { haptics.performHapticFeedback(HapticFeedbackType.Confirm); burst.snapTo(0f); burst.animateTo(1f, tween(1150, easing = LinearOutSlowInEasing)) }
+        // The celebratory double tap plays once from the app (several rings can show the same provider).
+        if (renewed && !wasRenewed && !reduced) { burst.snapTo(0f); burst.animateTo(1f, tween(1150, easing = LinearOutSlowInEasing)) }
         wasRenewed = renewed
     }
     val hot = s != null && !renewed && s.used >= .9 && !reduced
@@ -287,7 +288,11 @@ fun forecastLine(f: Forecast?, now: Long, clock24: Boolean): String? {
         action = incident.url?.let { "Status page" }, clicked = { incident.url?.let(openUrl) }, tone = tone)
 }
 
-@Composable fun SectionLabel(text: String) { Text(text, fontSize = 12.sp, letterSpacing = .4.sp, color = LocalTokens.current.muted, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 18.dp, top = 8.dp)) }
+@Composable fun SectionLabel(text: String) {
+    // Classic headers are the small uppercase footnotes of iOS grouped lists.
+    if (LocalStyle.current == UiStyle.Classic) Text(text.uppercase(), fontSize = 12.5.sp, letterSpacing = .3.sp, color = LocalTokens.current.muted, modifier = Modifier.padding(start = 18.dp, top = 12.dp))
+    else Text(text, fontSize = 12.sp, letterSpacing = .4.sp, color = LocalTokens.current.muted, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 18.dp, top = 8.dp))
+}
 
 /** An iOS-style settings row: title, an optional short hint, and a switch. The whole row is the touch target. */
 @Composable fun SettingToggle(title: String, detail: String?, value: Boolean, changed: (Boolean) -> Unit) {

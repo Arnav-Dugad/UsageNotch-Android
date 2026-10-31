@@ -16,6 +16,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -90,7 +91,7 @@ fun dynamicTokens(scheme: androidx.compose.material3.ColorScheme, dark: Boolean)
     scheme.surfaceContainerHighest, scheme.outlineVariant.copy(alpha = .6f), scheme.onSurface, scheme.onSurfaceVariant, scheme.outline, scheme.primary, scheme.onPrimary,
     scheme.onSurface.copy(alpha = .14f), scheme.onSurface)
 
-@Composable fun NotchTheme(appearance: String = "system", wallpaper: Boolean = false, content: @Composable () -> Unit) {
+@Composable fun NotchTheme(appearance: String = "system", wallpaper: Boolean = false, style: UiStyle = UiStyle.Glass, content: @Composable () -> Unit) {
     val dark = when (appearance) { "light" -> false; "dark" -> true; else -> isSystemInDarkTheme() }
     val context = androidx.compose.ui.platform.LocalContext.current
     val t: Tokens; val scheme: androidx.compose.material3.ColorScheme
@@ -98,12 +99,21 @@ fun dynamicTokens(scheme: androidx.compose.material3.ColorScheme, dark: Boolean)
         scheme = if (dark) androidx.compose.material3.dynamicDarkColorScheme(context) else androidx.compose.material3.dynamicLightColorScheme(context)
         t = dynamicTokens(scheme, dark)
     } else {
-        t = if (dark) DarkTokens else LightTokens
+        t = when { style == UiStyle.Classic && dark -> ClassicDarkTokens; style == UiStyle.Classic -> ClassicLightTokens; dark -> DarkTokens; else -> LightTokens }
         scheme = if (dark) darkColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
             else lightColorScheme(primary = t.accent, onPrimary = t.onAccent, background = t.background, surface = t.card, surfaceContainerHigh = t.raised, onSurface = t.text, onSurfaceVariant = t.muted, outline = t.hairline)
     }
     // One call site for the content, so switching wallpaper colors keeps the current tab and scroll position.
-    CompositionLocalProvider(LocalTokens provides t) { MaterialTheme(colorScheme = scheme, content = content) }
+    // Status and navigation bar icons follow the app's own theme, not the system's, so they stay readable in Light.
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) androidx.compose.runtime.SideEffect {
+        (view.context as? android.app.Activity)?.window?.let { window ->
+            androidx.core.view.WindowCompat.getInsetsController(window, view).apply { isAppearanceLightStatusBars = !t.dark; isAppearanceLightNavigationBars = !t.dark }
+        }
+    }
+    // Classic dialogs and sheets use the continuous, tighter corners of iOS alerts.
+    val shapes = if (style == UiStyle.Classic) androidx.compose.material3.Shapes(extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), large = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) else MaterialTheme.shapes
+    CompositionLocalProvider(LocalTokens provides t, LocalStyle provides style) { MaterialTheme(colorScheme = scheme, shapes = shapes, content = content) }
 }
 
 /** Brand marks: Claude and Gemini keep their own colours; OpenAI and Cursor use the theme's ink, as on the desktop. */

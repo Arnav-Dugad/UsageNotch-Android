@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.inset
@@ -67,6 +68,7 @@ private val effectsSupported = Build.VERSION.SDK_INT >= 31 && Build.FINGERPRINT 
 
 /** Glass behind this element. Without a backdrop (for example in a dialog) it falls back to a tinted surface. */
 @Composable fun Modifier.glass(shape: androidx.compose.ui.graphics.Shape = GlassShapes.card, level: GlassLevel = GlassLevel.Card, tint: Color = Color.Unspecified): Modifier {
+    if (LocalStyle.current == UiStyle.Classic) return classic(if (shape === GlassShapes.card) ClassicShapes.card else shape, level, tint)
     val t = LocalTokens.current; val glass = LocalGlass.current
     val surface = glassSurface(t, level, tint)
     if (glass == null) return this.clip(shape).background(fallbackSurface(t, level, tint))
@@ -92,6 +94,34 @@ private val effectsSupported = Build.VERSION.SDK_INT >= 31 && Build.FINGERPRINT 
         onDrawSurface = { drawRect(if (effectsSupported) surface else fallbackSurface(t, level, tint)) },
         onDrawFront = { specularRim(shape, highlightAlpha, if (level == GlassLevel.Card) .8.dp.toPx() else 1.1.dp.toPx()) },
     )
+}
+
+/**
+ * The Classic surface: solid cards and fills, and floating bars in a frosted material that blurs what scrolls beneath
+ * (Android 12+) with a translucent tint, a hairline edge and a soft shadow. No lens, no rim.
+ */
+@Composable private fun Modifier.classic(shape: androidx.compose.ui.graphics.Shape, level: GlassLevel, tint: Color): Modifier {
+    val t = LocalTokens.current; val glass = LocalGlass.current; val density = LocalDensity.current
+    return when (level) {
+        GlassLevel.Card -> this.clip(shape).background(if (tint.isSpecified) tint.copy(alpha = tint.alpha * .06f).compositeOver(t.card) else t.card)
+        GlassLevel.Control -> this.clip(shape).background(if (tint.isSpecified) tint.copy(alpha = .16f) else ClassicFills.control(t.dark))
+        GlassLevel.Bar -> {
+            val hairline = t.hairline.copy(alpha = if (t.dark) .7f else .55f)
+            if (glass == null) this.clip(shape).background(ClassicFills.frostedFallback(t.dark))
+            else this.drawBackdrop(
+                backdrop = glass.screen,
+                shape = { shape },
+                effects = { if (effectsSupported) blur(with(density) { 28.dp.toPx() }) },
+                highlight = null,
+                shadow = { Shadow(radius = 22.dp, color = Color.Black.copy(alpha = if (t.dark) .35f else .08f)) },
+                onDrawSurface = { drawRect(if (effectsSupported) ClassicFills.frosted(t.dark) else ClassicFills.frostedFallback(t.dark)) },
+                onDrawFront = {
+                    val w = .6.dp.toPx(); val half = w / 2
+                    inset(half, half, half, half) { drawOutline(shape.createOutline(size, layoutDirection, this), hairline, style = androidx.compose.ui.graphics.drawscope.Stroke(w)) }
+                },
+            )
+        }
+    }
 }
 
 /** A light catching the glass edge: bright at the top-left, fading along the sides, with a faint return at the bottom-right. */
@@ -137,6 +167,8 @@ private fun fallbackSurface(t: Tokens, level: GlassLevel, tint: Color): Color {
  */
 @Composable fun AmbientBackground(colors: List<Color>, animate: Boolean, modifier: Modifier = Modifier) {
     val t = LocalTokens.current
+    // Classic is calm: the flat grouped background, no drifting light.
+    if (LocalStyle.current == UiStyle.Classic) { Canvas(modifier.fillMaxSize()) { drawRect(t.background) }; return }
     var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(animate) {
         if (!animate) return@LaunchedEffect
@@ -161,16 +193,24 @@ private fun fallbackSurface(t: Tokens, level: GlassLevel, tint: Color): Color {
 
 /** A pressable glass capsule that springs down under the finger, like iOS controls. */
 @Composable fun GlassButton(onClick: () -> Unit, modifier: Modifier = Modifier, prominent: Boolean = false, enabled: Boolean = true, contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 12.dp), content: @Composable RowScope.() -> Unit) {
-    val t = LocalTokens.current; val haptics = LocalHapticFeedback.current
+    val t = LocalTokens.current; val haptics = LocalHapticFeedback.current; val classic = LocalStyle.current == UiStyle.Classic
     val source = remember { MutableInteractionSource() }; val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .94f else 1f, spring(dampingRatio = .55f, stiffness = 700f), label = "Press")
+    val scale by animateFloatAsState(if (pressed) (if (classic) .97f else .94f) else 1f, spring(dampingRatio = .55f, stiffness = 700f), label = "Press")
+    // Classic buttons are iOS filled buttons: the accent for the main action, a grey fill for the rest, rounded rects
+    // (round only when they are icon buttons). Pressing dims them, as on iOS.
+    val iconOnly = contentPadding == PaddingValues(0.dp)
+    val surface = when {
+        !classic -> Modifier.glass(GlassShapes.capsule, GlassLevel.Control, if (prominent) t.accent else Color.Unspecified)
+        prominent -> Modifier.clip(if (iconOnly) GlassShapes.capsule else ClassicShapes.control).background(t.accent)
+        else -> Modifier.clip(if (iconOnly) GlassShapes.capsule else ClassicShapes.control).background(ClassicFills.control(t.dark))
+    }
     Row(
-        modifier.graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else .45f }
-            .glass(GlassShapes.capsule, GlassLevel.Control, if (prominent) t.accent else Color.Unspecified)
+        modifier.graphicsLayer { scaleX = scale; scaleY = scale; alpha = (if (enabled) 1f else .45f) * (if (classic && pressed) .72f else 1f) }
+            .then(surface)
             .clickable(source, null, enabled = enabled, role = Role.Button) { haptics.performHapticFeedback(HapticFeedbackType.ContextClick); onClick() }
             .padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
-    ) { CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides if (prominent) t.accent else t.text) { content() } }
+    ) { CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides when { classic && prominent -> t.onAccent; prominent || classic -> t.accent; else -> t.text }) { content() } }
 }
 
 @Composable fun GlassIconButton(icon: ImageVector, description: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, tint: Color = LocalTokens.current.text) {
@@ -180,9 +220,15 @@ private fun fallbackSurface(t: Tokens, level: GlassLevel, tint: Color): Color {
 /** A glass chip for filters and pickers. */
 @Composable fun GlassChip(label: String, selected: Boolean, modifier: Modifier = Modifier, leading: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
     val t = LocalTokens.current
-    val color by animateColorAsState(if (selected) t.text else t.muted, label = "Chip")
+    val classic = LocalStyle.current == UiStyle.Classic
+    val color by animateColorAsState(if (classic && selected) t.onAccent else if (selected) t.text else if (classic) t.text else t.muted, label = "Chip")
     Row(
-        modifier.clip(GlassShapes.capsule).then(if (selected) Modifier.glass(GlassShapes.capsule, GlassLevel.Control, t.accent) else Modifier.background(if (t.dark) Color(0x0DFFFFFF) else Color(0x0D000000)))
+        modifier.clip(GlassShapes.capsule).then(when {
+            classic && selected -> Modifier.background(t.accent)
+            classic -> Modifier.background(ClassicFills.control(t.dark))
+            selected -> Modifier.glass(GlassShapes.capsule, GlassLevel.Control, t.accent)
+            else -> Modifier.background(if (t.dark) Color(0x0DFFFFFF) else Color(0x0D000000))
+        })
             .clickable(role = Role.RadioButton) { onClick() }.semantics { this.selected = selected }.padding(horizontal = 13.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -200,19 +246,24 @@ private fun fallbackSurface(t: Tokens, level: GlassLevel, tint: Color): Color {
     var width by remember { mutableIntStateOf(0) }
     val position = remember { Animatable(selected.toFloat()) }
     LaunchedEffect(selected, reduced) { if (reduced) position.snapTo(selected.toFloat()) else position.animateTo(selected.toFloat(), spring(dampingRatio = .72f, stiffness = 420f)) }
-    val stretch = (1f + abs(position.velocity) * .08f).coerceAtMost(1.35f)
+    val classic = LocalStyle.current == UiStyle.Classic
+    // Classic is the iOS segmented control: a rounded track with a raised white (or grey) thumb that slides without stretching.
+    val stretch = if (classic) 1f else (1f + abs(position.velocity) * .08f).coerceAtMost(1.35f)
     val density = LocalDensity.current
-    Box(modifier.clip(GlassShapes.capsule).background(if (t.dark) Color(0x14FFFFFF) else Color(0x0F000000)).onSizeChanged { width = it.width }.padding(3.dp)) {
+    val trackShape = if (classic) ClassicShapes.segment else GlassShapes.capsule
+    val thumbShape = if (classic) ClassicShapes.thumb else GlassShapes.capsule
+    Box(modifier.clip(trackShape).background(if (classic) ClassicFills.control(t.dark) else if (t.dark) Color(0x14FFFFFF) else Color(0x0F000000)).onSizeChanged { width = it.width }.padding(if (classic) 2.dp else 3.dp)) {
         if (width > 0) {
-            val cell = with(density) { ((width - 6.dp.roundToPx()) / options.size.toFloat()).toDp() }
-            Box(Modifier.width(cell).height(34.dp).offset { IntOffset((position.value * cell.toPx()).roundToInt(), 0) }
+            val cell = with(density) { ((width - (if (classic) 4.dp else 6.dp).roundToPx()) / options.size.toFloat()).toDp() }
+            Box(Modifier.width(cell).height(if (classic) 32.dp else 34.dp).offset { IntOffset((position.value * cell.toPx()).roundToInt(), 0) }
                 .graphicsLayer { scaleX = stretch; scaleY = 1f / stretch.coerceAtMost(1.15f) }
-                .glass(GlassShapes.capsule, GlassLevel.Control))
+                .then(if (classic) Modifier.shadow(if (t.dark) 0.dp else 2.dp, thumbShape, ambientColor = Color.Black.copy(alpha = .12f), spotColor = Color.Black.copy(alpha = .12f)).clip(thumbShape).background(ClassicFills.thumb(t.dark))
+                    else Modifier.glass(GlassShapes.capsule, GlassLevel.Control)))
         }
-        Row(Modifier.height(34.dp)) {
+        Row(Modifier.height(if (classic) 32.dp else 34.dp)) {
             options.forEachIndexed { i, label ->
                 val on = i == selected
-                Box(Modifier.weight(1f).fillMaxHeight().clip(GlassShapes.capsule).clickable(role = Role.RadioButton) { if (!on) { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick); onSelect(i) } }
+                Box(Modifier.weight(1f).fillMaxHeight().clip(thumbShape).clickable(role = Role.RadioButton) { if (!on) { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick); onSelect(i) } }
                     .semantics { this.selected = on; descriptions?.getOrNull(i)?.let { contentDescription = it } }, contentAlignment = Alignment.Center) {
                     Text(label, fontSize = 13.sp, color = if (on) t.text else t.muted, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
                 }
@@ -235,10 +286,12 @@ data class TabItem(val label: String, val icon: ImageVector)
     var touching by remember { mutableStateOf(false) }
     var dragging by remember { mutableStateOf(false) }
     LaunchedEffect(selected, reduced) { if (!dragging) { if (reduced) position.snapTo(selected.toFloat()) else position.animateTo(selected.toFloat(), spring(dampingRatio = .68f, stiffness = 380f)) } }
-    val swell by animateFloatAsState(if (touching && !reduced) 1.14f else 1f, spring(dampingRatio = .5f, stiffness = 500f), label = "Swell")
-    val stretch = (1f + abs(position.velocity) * .09f).coerceAtMost(1.4f)
+    val classic = LocalStyle.current == UiStyle.Classic
+    // Classic: a frosted bar whose selection is a quiet tinted pill; no lens, no swell, no stretch.
+    val swell by animateFloatAsState(if (touching && !reduced && !classic) 1.14f else 1f, spring(dampingRatio = .5f, stiffness = 500f), label = "Swell")
+    val stretch = if (classic) 1f else (1f + abs(position.velocity) * .09f).coerceAtMost(1.4f)
     val inner = 6.dp
-    Box(modifier.height(66.dp).glass(GlassShapes.capsule, GlassLevel.Bar).onSizeChanged { width = it.width }.padding(inner)
+    Box(modifier.height(66.dp).glass(if (classic) ClassicShapes.bar else GlassShapes.capsule, GlassLevel.Bar).onSizeChanged { width = it.width }.padding(inner)
         .pointerInput(items.size) {
             val cell = (size.width.toFloat()) / items.size
             detectTapGestures(onPress = { touching = true; tryAwaitRelease(); touching = false })
@@ -267,7 +320,7 @@ data class TabItem(val label: String, val icon: ImageVector)
             val cell = with(density) { ((width - (inner * 2).roundToPx()) / items.size.toFloat()).toDp() }
             Box(Modifier.width(cell).fillMaxHeight().offset { IntOffset((position.value * cell.toPx()).roundToInt(), 0) }
                 .graphicsLayer { scaleX = stretch * swell; scaleY = swell / stretch.coerceAtMost(1.18f) }
-                .glass(GlassShapes.capsule, GlassLevel.Control, t.accent))
+                .then(if (classic) Modifier.clip(RoundedRectangle(22.dp)).background(t.accent.copy(alpha = if (t.dark) .18f else .12f)) else Modifier.glass(GlassShapes.capsule, GlassLevel.Control, t.accent)))
         }
         Row(Modifier.fillMaxSize()) {
             items.forEachIndexed { index, item ->
