@@ -673,14 +673,16 @@ internal fun demoSnapshot(): Snapshot {
     fun window(id: String, label: String, used: Double, reset: Long, detail: String? = null, forecast: Forecast? = null) = UsageWindow(id, label, used, now, reset, (0..48).map { Reading(now - (48 - it) * 1_200_000L, used * (.25 + .75 * it / 48), "preview") }, detail, forecast = forecast)
     return Snapshot(now, listOf(
         Provider("claude", "Claude", "Ok", listOf(window("five_hour", "Current session", .27, now + 7_845_000, forecast = Forecast("Estimated 61.4% used at reset", 15.6, 61.4, null, "Consistent pace")), window("seven_day", "All models", .41, now + 231_845_000), window("seven_day_sonnet", "Sonnet weekly", .12, now + 231_845_000)),
-            account = "Sample account", updatedAt = now, manageUrl = "https://claude.ai/settings/usage", session = "five_hour", weekly = "seven_day",
+            account = "Sample account", updatedAt = now, manageUrl = "https://claude.ai/settings/usage", session = "five_hour", weekly = "seven_day", plan = "Max 5×",
+            breakdown = listOf(Share("Claude Code", 82.0), Share("Claude", 18.0)),
             extras = listOf(Extra("extra_usage", "Usage credits", "Pay-as-you-go usage after plan limits", null, 3.5, null, "USD")),
             history = listOf(demoInsights(demoHistory("five_hour", "Current session", 1.0, 3), now, 5 * 3_600_000L, 3), demoInsights(demoHistory("seven_day", "All models", .16, 5), now, 7 * 86_400_000L, 5))),
         Provider("codex", "Codex", "Ok", listOf(window("codex-primary", "5-hour limit", .16, now + 11_400_000), window("codex-secondary", "Weekly limit", .49, now + 401_840_000)), updatedAt = now, manageUrl = "https://chatgpt.com/codex/settings/usage", session = "codex-primary", weekly = "codex-secondary",
-            history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11))),
+            history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11)), plan = "Plus"),
         Provider("gemini", "Gemini", "Ok", listOf(window("gemini-2.5-pro", "Gemini 2.5 Pro", .72, now + 50_000_000)), updatedAt = now),
-        Provider("codex:work", "Codex · Work", "Ok", listOf(window("codex-primary", "5-hour limit", .58, now + 4_100_000, forecast = Forecast("Estimated 92.0% used at reset", 22.0, 92.0, null, "Consistent pace")), window("codex-secondary", "Weekly limit", .33, now + 301_840_000)),
-            updatedAt = now, session = "codex-primary", weekly = "codex-secondary", kind = "codex", accountLabel = "Work"),
+        Provider("codex:work", "Codex · Work", "Ok", listOf(window("codex-primary", "5-hour limit", .58, now + 4_100_000, forecast = Forecast("Estimated 92.0% used at reset", 22.0, 92.0, null, "Consistent pace")), window("codex-secondary", "Weekly limit", .33, now + 301_840_000), UsageWindow("codex-monthly", "Monthly limit", .2, now, now + 20 * 86_400_000L, emptyList(), "Credits shared across Codex and other ChatGPT agents", 30.0, 150.0, "credits")),
+            updatedAt = now, session = "codex-primary", weekly = "codex-secondary", kind = "codex", accountLabel = "Work", plan = "Edu",
+            extras = listOf(Extra("codex-reset-credits", "Free limit reset", "Full reset (Weekly + 5 hr) · use by " + java.time.LocalDate.now().plusDays(6).format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.ENGLISH)) + " · redeem it in Codex", null, null, null, null))),
     ), "sample", protocol = 2, features = Snapshot.FEATURES.split(',').toSet(),
         incidents = listOf(Incident("claude", "Elevated errors on Claude Opus", "minor", "monitoring", "https://status.claude.com", now - 1_800_000)),
         tokens = demoTokens(now))
@@ -752,7 +754,7 @@ internal fun demoHistory(window: String, label: String, scale: Double, seed: Int
     val random = java.util.Random(seed.toLong())
     fun day(back: Int): Day {
         val date = today.minusDays(back.toLong()); val weekend = date.dayOfWeek.value >= 6
-        return Day(date.toString(), if (back in setOf(12, 13, 21, 44, 45, 67)) null else scale * ((if (weekend) .15 else .55) + random.nextDouble() * .45))
+        return if (back in setOf(12, 13, 21, 44, 45, 67)) Day(date.toString(), null) else Day(date.toString(), scale * ((if (weekend) .15 else .55) + random.nextDouble() * .45), (if (back == 0) .9 else .55 + random.nextDouble() * .45))
     }
     val calendar = (89 downTo 0).map { day(it) }
     val days = calendar.takeLast(30)

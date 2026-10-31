@@ -117,11 +117,10 @@ class UiTest {
         compose.onNodeWithContentDescription("History").performClick()
         val today = java.time.LocalDate.now().toString()
         compose.onNode(SemanticsMatcher("click label Open $today") { it.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsActions.OnClick) { null }?.label == "Open $today" }).performClick()
-        compose.onNodeWithText("of the limit used that day").assertExists()
-        compose.onNodeWithText("Your average").assertExists()
+        compose.onNodeWithText("Compared with usual").assertExists()
         screenshot("03c-history-day")
         compose.onNodeWithContentDescription("Close").performClick()
-        compose.onNodeWithText("of the limit used that day").assertDoesNotExist()
+        compose.onNodeWithText("Compared with usual").assertDoesNotExist()
     }
     @Test fun tabBarSelectsTabs() {
         compose.setContent { NotchTheme("dark") { NotchApp() } }

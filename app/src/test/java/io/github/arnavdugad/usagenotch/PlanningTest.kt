@@ -93,7 +93,7 @@ class PlanningTest {
         val s = Snapshot(0, listOf(Provider("claude", "Claude", "Ok", listOf(window("five_hour", "S", .1, 0, null)), session = "five_hour", history = listOf(h))))
         val text = Recap.compose(s, today)!!
         // Six days at 10% and one at 80%, older days excluded; the busiest was Sunday the 27th.
-        assertEquals("Claude 140% · busiest Sunday · 4-day streak", text.body)
+        assertEquals("Claude 1.4× the current session limit · busiest Sunday · 4-day streak", text.body)
         assertNull(Recap.compose(Snapshot(0, emptyList()), today))
     }
 

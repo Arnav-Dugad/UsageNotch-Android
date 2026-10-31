@@ -7,8 +7,8 @@ android {
         applicationId = "io.github.arnavdugad.usagenotch"
         minSdk = 28
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.6.0"
+        versionCode = 9
+        versionName = "1.7.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {

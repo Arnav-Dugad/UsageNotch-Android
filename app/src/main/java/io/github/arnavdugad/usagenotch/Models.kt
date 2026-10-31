@@ -29,8 +29,14 @@ data class UsageWindow(
 }
 /** A reported limit without a percentage, such as pay-as-you-go credits. */
 data class Extra(val id: String, val label: String, val detail: String?, val reset: Long?, val usedAmount: Double?, val limitAmount: Double?, val unit: String?)
-/** One local date of consumption as a fraction of the limit; null when the PC recorded nothing that day. */
-data class Day(val date: String, val used: Double?)
+/**
+ * One local date of consumption as a fraction of the limit; null when the PC recorded nothing that day. From Windows 2.7
+ * [used] includes usage that happened while the PC was off or asleep (counted on the day it was next read), and [coverage]
+ * says how much of the day the PC observed (0..1), or null from older PCs.
+ */
+data class Day(val date: String, val used: Double?, val coverage: Double? = null)
+/** A part of the week's usage as the provider reports it, such as "Claude Code" at 100%. */
+data class Share(val name: String, val percent: Double)
 /**
  * 30 days of one window from the PC: daily consumption, a weekday x hour heatmap (index weekday*24+hour, Sunday first),
  * the number of distinct observed hours per cell (so missing data is never shown as quiet), and the current streak.
@@ -60,6 +66,10 @@ data class Provider(
     val session: String? = null, val weekly: String? = null, val extras: List<Extra> = emptyList(), val history: List<History> = emptyList(),
     /** Protocol 2 "accounts": the provider type behind an id such as `claude:work`, and the label you gave that account. */
     val kind: String = providerKind(id), val accountLabel: String? = null,
+    /** The subscription the provider reports ("Max 5×", "Plus", "Edu"…), from Windows 2.7. */
+    val plan: String? = null,
+    /** Where this week's usage went, from Windows 2.7 (Claude). */
+    val breakdown: List<Share> = emptyList(),
 ) {
     /** The window the desktop dock's outer ring shows. */
     fun sessionWindow(): UsageWindow? = windows.firstOrNull { it.id == session } ?: when (providerKind(id)) {
@@ -87,7 +97,9 @@ data class TokenTotals(val input: Long, val output: Long, val cacheRead: Long, v
 data class TokenDay(val date: String, val total: Long, val cost: Double?)
 data class TokenShare(val name: String, val total: Long, val cost: Double?, val share: Double)
 /** Tokens a coding tool recorded on the PC (Claude Code, Codex), with an API-price equivalent cost. */
-data class TokenSource(val id: String, val label: String, val today: TokenTotals?, val week: TokenTotals?, val days: List<TokenDay>, val projects: List<TokenShare>, val models: List<TokenShare>)
+data class TokenSource(val id: String, val label: String, val today: TokenTotals?, val week: TokenTotals?, val days: List<TokenDay>, val projects: List<TokenShare>, val models: List<TokenShare>,
+    /** Totals from the provider for the whole account, across every device (Codex), rather than this PC's transcripts. Costs are null then. */
+    val allDevices: Boolean = false, val lifetime: Long? = null, val peakDaily: Long? = null, val longestStreak: Int? = null)
 data class TokenUsage(val updatedAt: Long, val sources: List<TokenSource>)
 
 data class Snapshot(
@@ -115,7 +127,9 @@ data class Snapshot(
             TokenUsage(t.optLong("updatedAt", 0), t.list("sources", 8) { s ->
                 fun shares(key: String, max: Int) = s.list(key, max) { TokenShare(it.getString("name").filterNot { c -> c.isISOControl() }.take(80), it.count("total"), it.number("cost"), (it.number("share") ?: 0.0).coerceIn(0.0, 1.0)) }
                 TokenSource(s.getString("id").take(80), s.getString("label").take(60), totals(s.optJSONObject("today")), totals(s.optJSONObject("week")),
-                    s.list("days", 60) { TokenDay(it.getString("date").take(10), it.count("total"), it.number("cost")) }, shares("projects", 8), shares("models", 6))
+                    s.list("days", 60) { TokenDay(it.getString("date").take(10), it.count("total"), it.number("cost")) }, shares("projects", 8), shares("models", 6),
+                    s.optBoolean("allDevices", false), s.time("lifetime")?.coerceIn(0, 1_000_000_000_000_000L), s.time("peakDaily")?.coerceIn(0, 1_000_000_000_000_000L),
+                    if (s.has("longestStreak") && !s.isNull("longestStreak")) s.getInt("longestStreak").coerceIn(0, 100_000) else null)
             })
         }.getOrNull() }
         private fun parseShared(root: JSONObject): Map<String, SharedEntry> = root.optJSONObject("shared")?.let { SharedSettings.parseEntries(it) } ?: emptyMap()
@@ -139,7 +153,8 @@ data class Snapshot(
                 val h = list.getJSONObject(i); val days = h.getJSONArray("days"); val heat = h.getJSONArray("heat"); val observed = h.getJSONArray("observed")
                 val calendar = h.optJSONArray("calendar")
                 require(days.length() <= 60 && heat.length() == 168 && observed.length() == 168 && (calendar?.length() ?: 0) <= 120)
-                fun daysOf(a: JSONArray) = (0 until a.length()).map { d -> val day = a.getJSONObject(d); Day(day.getString("date").take(10), if (day.isNull("used") || !day.has("used")) null else day.getDouble("used").takeIf { it.isFinite() && it >= 0 }) }
+                fun daysOf(a: JSONArray) = (0 until a.length()).map { d -> val day = a.getJSONObject(d); Day(day.getString("date").take(10), if (day.isNull("used") || !day.has("used")) null else day.getDouble("used").takeIf { it.isFinite() && it >= 0 },
+                    day.number("coverage")?.takeIf { it >= 0 }?.coerceAtMost(1.0)) }
                 // Protocol 2 extras are optional and individually bounded; a damaged one is dropped, never the whole history.
                 val extra = runCatching { parseInsights(h) }.getOrNull()
                 History(h.getString("window").take(100), h.getString("label").take(80), daysOf(days),
@@ -176,6 +191,8 @@ data class Snapshot(
                 val baseName = p.getString("name").take(60)
                 // Extra accounts read as "Claude · Work", unless the PC already put the label in the name.
                 val name = if (accountLabel != null && !baseName.contains(accountLabel, ignoreCase = true)) "$baseName · $accountLabel" else baseName
+                val parsedExtras = (0 until (extras?.length() ?: 0)).map { n -> val e = extras!!.getJSONObject(n)
+                    Extra(e.getString("id").take(100), e.getString("label").take(80), e.text("detail", 160), e.time("reset"), e.number("usedAmount"), e.number("limitAmount"), e.text("unit", 12)) }
                 Provider(id, name, p.getString("status").take(40), (0 until windows.length()).map { j ->
                     val w = windows.getJSONObject(j); val used = w.getDouble("used")
                     require(used.isFinite() && used >= 0 && used <= 1000)
@@ -188,9 +205,10 @@ data class Snapshot(
                             f.number("lowRate")?.takeIf { it >= 0 }, f.number("highRate")?.takeIf { it >= 0 }) })
                 }, p.text("statusText", 400), p.text("account", 80), p.time("updatedAt"), https(p.text("manageUrl", 300)),
                     p.text("session", 100), p.text("weekly", 100),
-                    (0 until (extras?.length() ?: 0)).map { n -> val e = extras!!.getJSONObject(n)
-                        Extra(e.getString("id").take(100), e.getString("label").take(80), e.text("detail", 160), e.time("reset"), e.number("usedAmount"), e.number("limitAmount"), e.text("unit", 12)) },
-                    parseHistory(p), p.text("kind", 40)?.let { providerKind(it) } ?: providerKind(id), accountLabel)
+                    parsedExtras,
+                    parseHistory(p), p.text("kind", 40)?.let { providerKind(it) } ?: providerKind(id), accountLabel,
+                    p.text("plan", 30)?.filterNot { it.isISOControl() },
+                    runCatching { p.list("breakdown", 16) { b -> Share(b.getString("name").filterNot { it.isISOControl() }.take(40), (b.number("percent") ?: 0.0).coerceIn(0.0, 100.0)) }.filter { it.percent > 0 }.take(8) }.getOrDefault(emptyList()))
             }, root.optString("source").take(40).ifBlank { null }, root.optString("appVersion").take(20).ifBlank { null },
                 root.optInt("protocol", 1).coerceIn(1, 100),
                 root.optJSONArray("features")?.let { f -> require(f.length() <= 64); (0 until f.length()).map { f.getString(it).take(40) }.toSet() } ?: emptySet(),
@@ -296,13 +314,44 @@ object ClockText {
     internal fun localDate(at: Long): LocalDate = Instant.ofEpochMilli(at).atZone(zone()).toLocalDate()
 }
 /** Desktop amount line: "$3.50 of $20.00", "$3.50 used", or the provider's own detail. */
+/**
+ * Desktop amount line: "$3.50 of $20", "30 of 150 credits", "$3.50 used", or the provider's own detail. Whole numbers drop
+ * their decimals; the unit is said once.
+ */
 fun amountText(usedAmount: Double?, limitAmount: Double?, unit: String?, detail: String?): String {
-    fun money(v: Double) = if (unit.equals("USD", true)) "$" + "%.2f".format(Locale.ROOT, v) else "%.2f".format(Locale.ROOT, v) + (unit?.let { " $it" } ?: "")
+    val usd = unit.equals("USD", true)
+    fun num(v: Double) = if (kotlin.math.abs(v - kotlin.math.round(v)) < .005) "%,.0f".format(Locale.US, v) else "%,.2f".format(Locale.US, v)
+    fun money(v: Double) = if (usd) "$" + num(v) else num(v)
+    val suffix = if (usd || unit.isNullOrBlank()) "" else " $unit"
     return when {
-        usedAmount != null && limitAmount != null && limitAmount > 0 -> "${money(usedAmount)} of ${money(limitAmount)}"
-        usedAmount != null -> "${money(usedAmount)} used"
+        usedAmount != null && limitAmount != null && limitAmount > 0 -> "${money(usedAmount)} of ${money(limitAmount)}$suffix"
+        usedAmount != null -> "${money(usedAmount)}$suffix used"
         else -> detail ?: ""
     }
+}
+
+/**
+ * Usage in "limits", worded as on the desktop: under one full limit as a percentage ("48%"), from one up as a multiple
+ * ("1.6×", "2×"), so a week of 561% reads as "5.6×" — five and a half limits' worth.
+ */
+object LimitText {
+    fun of(fraction: Double?): String = when {
+        fraction == null -> "—"
+        fraction >= .995 -> "%.1f".format(Locale.US, fraction).removeSuffix(".0") + "×"
+        else -> "${(fraction * 100).roundToInt()}%"
+    }
+    /** "5.6 full current session limits' worth" or "of one current session limit". */
+    fun worth(fraction: Double?, label: String): String {
+        val name = label.lowercase(Locale.ENGLISH)
+        return if (fraction != null && fraction >= .995) "%.1f".format(Locale.US, fraction).removeSuffix(".0") + " full $name limits' worth" else "of one $name limit"
+    }
+    /** "1.6× more" or "30% less" than the average. */
+    fun compared(used: Double, average: Double): String = when {
+        average <= .0001 -> "—"
+        used >= average -> "%.1f".format(Locale.US, used / average).removeSuffix(".0") + "× more"
+        else -> "${((1 - used / average) * 100).roundToInt()}% less"
+    }
+    fun coverage(c: Double?) = c?.let { "${(it * 100).roundToInt()}% of the day observed" }
 }
 fun readingState(p: Provider, w: UsageWindow, now: Long): String = when {
     w.at > now + 60_000 -> "Check PC clock"

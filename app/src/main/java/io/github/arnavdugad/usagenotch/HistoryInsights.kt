@@ -31,7 +31,7 @@ import kotlin.math.roundToInt
 
 /** "1.2M", "340k", "820": compact token counts. */
 internal fun tokens(n: Long): String = when {
-    n >= 1_000_000_000 -> "%.1fB".format(Locale.ENGLISH, n / 1e9)
+    n >= 1_000_000_000 -> "%.2f".format(Locale.ENGLISH, n / 1e9).trimEnd('0').trimEnd('.') + "B"
     n >= 10_000_000 -> "%.0fM".format(Locale.ENGLISH, n / 1e6)
     n >= 1_000_000 -> "%.1fM".format(Locale.ENGLISH, n / 1e6)
     n >= 10_000 -> "%.0fk".format(Locale.ENGLISH, n / 1e3)
@@ -80,10 +80,11 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
                 Panel(Modifier.weight(1f), 18.dp, innerSurface()) { Column(Modifier.padding(14.dp).semantics(mergeDescendants = true) {}) {
                     Text(label, fontSize = 12.sp, color = t.muted)
                     Text(totals?.let { tokens(it.total) } ?: "—", fontSize = 26.sp, fontWeight = FontWeight.Light, color = t.text)
-                    Text(totals?.cost?.let { "≈ ${dollars(it)} at API prices" } ?: "tokens", fontSize = 11.sp, color = t.faint, maxLines = 1)
+                    Text(totals?.cost?.let { "≈ ${dollars(it)} at API prices" } ?: if (source.allDevices) "tokens, all devices" else "tokens", fontSize = 11.sp, color = t.faint, maxLines = 1)
                 } }
             }
         }
+        if (source.allDevices) tokenFacts(source)?.let { Text(it, fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(top = 10.dp)) }
         val days = source.days.takeLast(30)
         if (days.isNotEmpty()) {
             val max = (days.maxOfOrNull { it.total } ?: 0L).coerceAtLeast(1L)
@@ -114,7 +115,37 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
         }
         Shares("Projects · 7 days", source.projects)
         Shares("Models · 7 days", source.models)
-        Text("API-price equivalent from local logs. Your plan's actual charge differs.", fontSize = 11.sp, color = t.faint, modifier = Modifier.padding(top = 10.dp))
+        Text(if (source.allDevices) "Totals come from OpenAI for this account, across every device. Projects and models come from the Codex transcripts on this PC."
+            else "From the transcripts Claude Code and Codex keep on your PC. API-price equivalent: what these tokens would cost on the pay-as-you-go API, not what your plan charges.", fontSize = 11.sp, color = t.faint, modifier = Modifier.padding(top = 10.dp))
+    } }
+}
+
+/** "Lifetime 1.89B tokens · busiest day 218M · longest streak 7 days", for account-wide totals. */
+fun tokenFacts(source: TokenSource): String? {
+    val parts = listOfNotNull(source.lifetime?.let { "Lifetime ${tokens(it)} tokens" }, source.peakDaily?.let { "busiest day ${tokens(it)}" },
+        source.longestStreak?.takeIf { it > 0 }?.let { "longest streak $it day${if (it == 1) "" else "s"}" })
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+}
+
+
+/** Where this week's usage went, as the provider reports it (Claude: Claude Code, chat…). */
+@Composable fun BreakdownCard(provider: Provider, reduced: Boolean) {
+    val shares = provider.breakdown; if (shares.isEmpty()) return
+    val t = LocalTokens.current; val accent = LocalAccent.current(provider.id); val grow = rise(provider.id + "b", reduced)
+    Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+        Title(Icons.Outlined.PieChartOutline, "Where this week went", provider.weeklyWindow()?.label)
+        shares.forEach { s ->
+            Column(Modifier.padding(top = 10.dp).semantics(mergeDescendants = true) {}) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(s.name, fontSize = 13.sp, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text("${"%.0f".format(Locale.ENGLISH, s.percent)}%", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = t.muted)
+                }
+                Box(Modifier.padding(top = 5.dp).fillMaxWidth().height(5.dp).clip(CircleShape).background(t.track)) {
+                    Box(Modifier.fillMaxWidth((s.percent / 100 * grow).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(CircleShape).background(accent))
+                }
+            }
+        }
+        Text("Shares of this week's usage, as ${provider.name} reports them.", fontSize = 11.sp, color = t.faint, modifier = Modifier.padding(top = 10.dp))
     } }
 }
 
@@ -126,7 +157,7 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
         Title(Icons.Outlined.PieChartOutline, "Unused capacity", "${periods.size} periods")
         Text("${(unused * 100).roundToInt()}% left unused", fontSize = 26.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 8.dp))
-        Text("on average when ${history.label.lowercase()} reset", fontSize = 12.sp, color = t.faint)
+        Text("on average, when the ${history.label.lowercase()} limit renewed", fontSize = 12.sp, color = t.faint)
         Canvas(Modifier.padding(top = 12.dp).fillMaxWidth().height(78.dp).semantics { contentDescription = "Peak use of the last ${periods.size} periods: " + periods.joinToString { "${(it.peak * 100).roundToInt()}%" } }) {
             val gap = 5.dp.toPx(); val bw = (size.width - gap * (periods.size - 1)) / periods.size; val r = CornerRadius(5.dp.toPx())
             periods.forEachIndexed { i, period ->
@@ -166,8 +197,8 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
     val share = r.fixed.toFloat() / r.periods
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
         Title(Icons.Outlined.Verified, "Reset reliability", "${r.periods} periods")
-        Text("${(share * 100).roundToInt()}% on time", fontSize = 26.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 8.dp))
-        Text(if (r.moved == 0) "The reported reset time never moved." else "${r.moved} ${if (r.moved == 1) "period" else "periods"} moved by ${"%.0f".format(Locale.ENGLISH, r.averageShiftMinutes)} min on average.", fontSize = 12.sp, color = t.faint)
+        Text("Kept in ${(share * 100).roundToInt()}%", fontSize = 26.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 8.dp))
+        Text(if (r.moved == 0) "In all ${r.periods} periods the reported reset time held." else "${r.fixed} of ${r.periods} periods kept their reported reset time; ${r.moved} moved by about ${"%.0f".format(Locale.ENGLISH, r.averageShiftMinutes)} min.", fontSize = 12.sp, color = t.faint)
         Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(8.dp).clip(CircleShape).background(Color(Palette.WARNING).copy(alpha = .35f))) {
             Box(Modifier.fillMaxWidth(share.coerceIn(0f, 1f)).fillMaxHeight().clip(CircleShape).background(Color(Palette.LIVE)))
         }
@@ -184,7 +215,7 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
         sessions.take(6).forEach { s ->
             Column(Modifier.padding(top = 10.dp).semantics(mergeDescendants = true) {}) {
                 Text("${dayTime(s.start, clock24)} – ${ClockText.time(s.end, clock24)}", fontSize = 13.sp, color = t.text)
-                Text("${"%.1f".format(Locale.ENGLISH, s.used)} points used · peak ${"%.0f".format(Locale.ENGLISH, s.peak)} an hour · ${duration(s.end - s.start)}", fontSize = 12.sp, color = t.muted)
+                Text("${"%.1f".format(Locale.ENGLISH, s.used)}% of the limit used · fastest ${"%.0f".format(Locale.ENGLISH, s.peak)}% an hour · ${duration(s.end - s.start)}", fontSize = 12.sp, color = t.muted)
             }
         }
         Text("Sessions are runs of readings without a gap over 20 minutes, not keyboard activity.", fontSize = 11.sp, color = t.faint, modifier = Modifier.padding(top = 10.dp))

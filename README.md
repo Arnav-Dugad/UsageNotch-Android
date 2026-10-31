@@ -6,7 +6,7 @@ Your Claude, Codex, Gemini and Cursor usage limits on your phone, in liquid glas
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.6.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.7.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
 | **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar, 2.6 for settings sync, Stats and tokens), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
@@ -49,6 +49,9 @@ Add them from the **Widgets** tab or your launcher's widget list, then resize fr
 Widgets are glass too: a translucent body that lets your wallpaper through, with a specular rim. From about 2×1 up, the refresh button in the corner updates straight from your PC with a spinner; 1×1 opens the app. Rings use the desktop's exact colour ramp (green → amber → red as a limit fills), a hairline for the time left before the reset, your budget mark, and the real Claude, OpenAI, Gemini and Cursor marks. Widgets follow your Light/Dark choice and your style: in Classic they have a solid rounded body.
 
 ## What you get
+
+- **Your plan and every kind of account** (Windows 2.7): a quiet badge shows the plan each provider reports ("Max 5×", "Plus", "Pro", "Edu", "Business"…). Edu, Business and Enterprise seats that report a monthly credit allowance show it as a limit ("30 of 150 credits"), with budgets and alerts like any other. Claude's dollar credit grants read as "$249.99 of $250". Bought credits and free limit resets appear as plain information rows, and a "Where this week went" card shows how Claude splits your week (Claude Code, chat…).
+- **Stats you can read at a glance** (Windows 2.7): one full limit is 100% and more than that is a multiple, so "5.6×" means five and a half limits' worth. History says how much of each day your PC actually observed. Usage while the PC was off or asleep, and usage right after a renewal, is now counted, so daily totals are complete.
 
 - **Two styles**: Liquid glass, or **Classic**, the calm grouped look of iOS settings: solid cards on a grouped background, continuous corners, hairline separators and frosted (blur only) floating bars. Settings → Appearance → Style; it switches instantly.
 - **Updates itself** from GitHub Releases: on Wi-Fi in the background, or with the Update button. Every download must come from GitHub, match the release's SHA-256, be a newer version and carry the same signature as the installed app.

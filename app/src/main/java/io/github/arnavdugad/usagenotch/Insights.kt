@@ -144,7 +144,7 @@ object BestStart {
 }
 
 /** One day in context: its usage, how it compares with the average, and its rank among recorded days. */
-data class DayInsight(val date: LocalDate, val used: Double?, val average: Double?, val rank: Int?, val recorded: Int, val others: List<Triple<String, String, Double?>>)
+data class DayInsight(val date: LocalDate, val used: Double?, val average: Double?, val rank: Int?, val recorded: Int, val others: List<Triple<String, String, Double?>>, val coverage: Double? = null)
 
 object Days {
     fun insight(providers: List<Provider>, provider: String, window: String, date: String): DayInsight? {
@@ -156,7 +156,7 @@ object Days {
         val rank = day.used?.let { u -> recorded.count { it > u } + 1 }
         val others = providers.flatMap { q -> q.history.filter { !(q.id == provider && it.window == window) }.map { oh -> Triple(q.name, oh.label, oh.calendar.ifEmpty { oh.days }.firstOrNull { it.date == date }?.used) } }
             .filter { it.third != null }
-        return DayInsight(LocalDate.parse(date), day.used, recorded.takeIf { it.isNotEmpty() }?.average(), rank, recorded.size, others)
+        return DayInsight(LocalDate.parse(date), day.used, recorded.takeIf { it.isNotEmpty() }?.average(), rank, recorded.size, others, day.coverage)
     }
     fun long(date: LocalDate): String = date.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.ENGLISH))
     fun short(date: LocalDate): String = date.format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.ENGLISH))
@@ -172,7 +172,7 @@ object Recap {
             val week = h.days.filter { runCatching { LocalDate.parse(it.date) }.getOrNull()?.let { d -> !d.isAfter(today) && d.isAfter(today.minusDays(7)) } == true }
             val used = week.mapNotNull { it.used }
             if (used.isEmpty()) continue
-            lines += "${p.name} ${(used.sum() * 100).roundToInt()}%"
+            lines += "${p.name} ${LimitText.of(used.sum())} ${if (used.sum() >= .995) "the" else "of the"} ${h.label.lowercase(Locale.ENGLISH)} limit"
             week.filter { it.used != null }.maxByOrNull { it.used!! }?.let { d -> if (busiest == null || d.used!! > busiest!!.second) busiest = LocalDate.parse(d.date) to d.used!! }
             streak = maxOf(streak, h.streak)
         }

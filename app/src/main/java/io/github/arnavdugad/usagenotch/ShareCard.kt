@@ -95,9 +95,9 @@ object ShareCard {
                 Logos.drawable(context, wk.provider.id, text)?.apply { setBounds((pad + 40).toInt(), (top + 18).toInt(), (pad + 96).toInt(), (top + 74).toInt()); draw(c) }
                 c.text(wk.provider.name, pad + 124, top + 46, 420f, paint(38f, text, bold = true))
                 c.text(wk.label, pad + 124, top + 84, 420f, paint(30f, muted))
-                val value = wk.total?.let { "${(it * 100).toInt()}%" } ?: "—"
+                val value = LimitText.of(wk.total)
                 c.text(value, w - pad - 40, top + 56, 300f, paint(56f, accentOf(wk.provider.id).let { Palette.readable(it, if (dark) 0xFF151922.toInt() else 0xFFFFFFFF.toInt()) }, bold = true), Paint.Align.RIGHT)
-                c.text("of the limit", w - pad - 40, top + 88, 300f, paint(26f, muted), Paint.Align.RIGHT)
+                c.text(if ((wk.total ?: 0.0) >= .995) "limits' worth" else "of one limit", w - pad - 40, top + 88, 300f, paint(26f, muted), Paint.Align.RIGHT)
             }
             y += height + 36
         }
@@ -105,7 +105,7 @@ object ShareCard {
         val streak = weeks.maxOfOrNull { it.streak } ?: 0
         val source = usage?.sources?.firstOrNull()
         val tiles = listOfNotNull(
-            busiest?.let { (wk, day) -> Triple("Busiest day", runCatching { LocalDate.parse(day.date).format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH)) }.getOrDefault(day.date), "${wk.provider.name} · ${((day.used ?: 0.0) * 100).toInt()}%") },
+            busiest?.let { (wk, day) -> Triple("Busiest day", runCatching { LocalDate.parse(day.date).format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH)) }.getOrDefault(day.date), "${wk.provider.name} · ${LimitText.of(day.used)} of the limit") },
             Triple("Streak", if (streak > 0) "$streak day${if (streak == 1) "" else "s"}" else "—", "in a row with usage"),
             source?.week?.let { t -> Triple("Tokens this week", tokens(t.total), t.cost?.let { "≈ ${dollars(it)} at API prices" } ?: source.label) },
             source?.projects?.firstOrNull()?.let { pr -> Triple("Top project", pr.name, "${(pr.share * 100).toInt()}% of ${source.label}") },

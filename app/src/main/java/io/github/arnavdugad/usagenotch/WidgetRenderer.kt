@@ -232,7 +232,8 @@ object WidgetRenderer {
     private fun focusFull(context: Context, canvas: Canvas, w: Float, h: Float, d: Float, ink: Ink, input: Input, p: Provider) {
         val pad = 14f
         val updated = p.updatedAt ?: p.windows.maxOfOrNull { it.at }
-        header(canvas, p.name, (updated?.let { ClockText.updated(it, input.now, input.use24) } ?: input.status) + (p.account?.let { " · $it" } ?: ""), w, d, ink, pad, p, context, statusPill(p, input.now, input.offline))
+        // The plan leads the subtitle on the focus widget: "Max 5× · Updated just now".
+        header(canvas, p.name, (p.plan?.let { "$it · " } ?: "") + (updated?.let { ClockText.updated(it, input.now, input.use24) } ?: input.status) + (p.account?.let { " · $it" } ?: ""), w, d, ink, pad, p, context, statusPill(p, input.now, input.offline))
         val top = pad + 42
         val windows = p.windows
         if (w >= 260 && h >= 190) {

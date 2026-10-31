@@ -71,13 +71,15 @@ object TokenWidget {
         if (h < 100) {
             // 2×1 and wide rows: the number and the cost under the header.
             text(canvas, tokens(total), pad * d, (h - pad) * d, (w * .5f) * d, paint(22f, ink, d, true))
-            today?.cost?.let { text(canvas, "≈ " + dollars(it), (w - pad) * d, (h - pad - 2) * d, (w * .5f - pad) * d, paint(11f, muted, d), Paint.Align.RIGHT) }
+            (today?.cost?.let { "≈ " + dollars(it) } ?: "all devices".takeIf { src.allDevices })?.let { text(canvas, it, (w - pad) * d, (h - pad - 2) * d, (w * .5f - pad) * d, paint(11f, muted, d), Paint.Align.RIGHT) }
         } else {
             val big = if (w < 170) 28f else 36f
             val base = pad + tile + 6 + big
             text(canvas, tokens(total), pad * d, base * d, (w - pad * 2) * d, paint(big, ink, d, true))
             var y = base
-            today?.cost?.let { y += 16; text(canvas, cost(it), pad * d, y * d, (w - pad * 2) * d, paint(10.5f, muted, d)) }
+            (today?.cost?.let { cost(it) } ?: "tokens, all devices".takeIf { src.allDevices })?.let { y += 16; text(canvas, it, pad * d, y * d, (w - pad * 2) * d, paint(10.5f, muted, d)) }
+            // Account-wide figures when the provider sends them (Codex): lifetime, busiest day, longest streak.
+            if (src.allDevices && h >= 170) tokenFacts(src)?.let { y += 15; text(canvas, it, pad * d, y * d, (w - pad * 2) * d, paint(9.5f, faint, d)) }
             y += 8
             if (top != null && h - y - pad >= 30) {
                 text(canvas, "Top project · 7 days", pad * d, (y + 11) * d, (w - pad * 2) * d, paint(10f, faint, d))

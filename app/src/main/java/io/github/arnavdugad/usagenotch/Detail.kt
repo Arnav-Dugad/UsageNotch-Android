@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import kotlinx.coroutines.CancellationException
 import kotlin.math.abs
@@ -63,7 +64,10 @@ import kotlin.math.roundToInt
             GlassIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onBack)
             Spacer(Modifier.width(12.dp))
             Logo(p.id, Modifier.size(22.dp)); Spacer(Modifier.width(9.dp))
-            Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = t.text, modifier = Modifier.weight(1f))
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                p.plan?.let { Spacer(Modifier.width(8.dp)); PlanBadge(it) }
+            }
             StatusPill(if (preview) "Preview" else statusPill(p, now, offline))
             p.manageUrl?.let { url -> Spacer(Modifier.width(8.dp)); GlassIconButton(Icons.AutoMirrored.Outlined.OpenInNew, "Open ${p.name} dashboard", { onDashboard(url) }) }
         }
@@ -89,9 +93,11 @@ import kotlin.math.roundToInt
         if (p.windows.isNotEmpty() || p.statusText != null) cards += {
             Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
                 p.statusText?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = t.muted, modifier = Modifier.padding(6.dp)) }
-                p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }, offline && !preview); if (index < p.windows.lastIndex) Spacer(Modifier.height(8.dp)) }
+                p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }, offline && !preview); if (index < p.windows.lastIndex || p.extras.isNotEmpty()) Spacer(Modifier.height(8.dp)) }
+                p.extras.forEachIndexed { index, e -> ExtraRow(e, now, clock24); if (index < p.extras.lastIndex) Spacer(Modifier.height(8.dp)) }
             } }
         }
+        if (p.breakdown.isNotEmpty()) cards += { BreakdownCard(p, reduced) }
         cards += { AccentCard(p, onAccent, customName, onName.takeIf { !preview }) }
         cards.forEachIndexed { index, card ->
             // Cards rise in one after another as the view opens.

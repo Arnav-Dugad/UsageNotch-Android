@@ -105,14 +105,20 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
     }
 }
 
+/**
+ * The week or month at a glance, worded as on the desktop: one full limit is 100%, more than that is a multiple
+ * ("5.6×" = five and a half limits' worth).
+ */
 @Composable private fun SummaryTiles(history: History, days: Int) {
     val range = history.last(days); val observed = range.mapNotNull { it.used }
+    val total = observed.takeIf { it.isNotEmpty() }?.sum()
     val busiest = range.filter { it.used != null }.maxByOrNull { it.used!! }
     val tiles = listOf(
-        Triple("Total", if (observed.isEmpty()) "—" else pct(observed.sum()), "$days days"),
-        Triple("Daily average", if (observed.isEmpty()) "—" else pct(observed.average()), "${observed.size} of ${range.size} days"),
-        Triple("Busiest day", busiest?.let { pct(it.used!!) } ?: "—", busiest?.let { runCatching { Days.short(LocalDate.parse(it.date)) }.getOrDefault(it.date) } ?: "—"),
-        Triple("Streak", "${history.streak}", if (history.streak == 1) "day" else "days"),
+        Triple("Used in $days days", LimitText.of(total), LimitText.worth(total, history.label)),
+        Triple("On an average day", if (observed.isEmpty()) "—" else LimitText.of(observed.average()),
+            if (observed.isEmpty()) "no readings yet" else "of the limit, over ${observed.size} day${if (observed.size == 1) "" else "s"} with readings"),
+        Triple("Busiest day", busiest?.let { runCatching { Days.short(LocalDate.parse(it.date)) }.getOrDefault(it.date) } ?: "—", busiest?.let { "${LimitText.of(it.used)} of the limit" } ?: "no usage recorded"),
+        Triple("Streak", if (history.streak > 0) "${history.streak} day${if (history.streak == 1) "" else "s"}" else "—", "in a row with usage"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         tiles.chunked(2).forEach { row ->
@@ -122,7 +128,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                     Panel(Modifier.weight(1f)) { Column(Modifier.padding(16.dp).semantics(mergeDescendants = true) {}) {
                         Text(label, fontSize = 12.sp, color = t.muted)
                         Text(value, fontSize = 28.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 2.dp))
-                        Text(detail, fontSize = 11.5.sp, color = t.faint, maxLines = 1)
+                        Text(detail, fontSize = 11.5.sp, lineHeight = 15.sp, color = t.faint, maxLines = 2)
                     } }
                 }
             }
@@ -138,7 +144,9 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
 @Composable private fun DailyBars(provider: Provider, history: History, days: Int, reduced: Boolean, openDay: DayKey?, onDay: (DayKey) -> Unit) {
     val t = LocalTokens.current; val accent = LocalAccent.current(provider.id); val shared = LocalSharedScope.current; val haptics = LocalHapticFeedback.current
     val range = history.last(days)
-    val max = (range.mapNotNull { it.used }.maxOrNull() ?: 0.0).coerceAtLeast(.05)
+    val recorded = range.mapNotNull { it.used }
+    val max = ((recorded.maxOrNull() ?: 0.0) * 1.08).coerceAtLeast(.05)
+    val average = recorded.takeIf { it.isNotEmpty() }?.average()
     val step = if (days > 7) 22 else 55
     val total = 520 + step * range.size
     val grow = remember(history.window, days) { Animatable(if (reduced) total.toFloat() else 0f) }
@@ -146,11 +154,20 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Daily usage", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = t.text, modifier = Modifier.weight(1f))
-            Text("Peak ${pct(max)}", fontSize = 12.sp, color = t.faint)
+            Text("100% = one full limit", fontSize = 12.sp, color = t.faint)
         }
         Spacer(Modifier.height(14.dp))
+        Box(Modifier.fillMaxWidth().height(140.dp)) {
+        // Reference lines behind the bars: one full limit (when a day comes near it) and your average.
+        Canvas(Modifier.matchParentSize()) {
+            val dash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
+            if (max >= .9) { val y = size.height * (1 - (1.0 / max).toFloat()); drawLine(t.text.copy(alpha = .22f), Offset(0f, y), Offset(size.width, y), 1.dp.toPx()) }
+            average?.let { val y = size.height * (1 - (it / max).toFloat()); drawLine(t.muted.copy(alpha = .6f), Offset(0f, y), Offset(size.width, y), 1.dp.toPx(), pathEffect = dash) }
+        }
+        if (max >= .9) Text("1 full limit", fontSize = 10.sp, lineHeight = 12.sp, color = t.faint, modifier = Modifier.align(Alignment.TopStart).offset(y = (140 * (1 - 1.0 / max)).dp - 16.dp))
+        average?.let { Text("average ${LimitText.of(it)}", fontSize = 10.sp, lineHeight = 12.sp, color = t.muted, modifier = Modifier.align(Alignment.TopEnd).offset(y = ((140 * (1 - it / max)).dp - 16.dp).coerceAtLeast((-14).dp))) }
         Row(Modifier.fillMaxWidth().height(140.dp).semantics {
-            contentDescription = "Daily usage for ${range.size} days: " + range.joinToString("; ") { d -> "${d.date} " + (d.used?.let { pct(it) } ?: "no data") }
+            contentDescription = "Daily usage for ${range.size} days, where 100% is one full limit: " + range.joinToString("; ") { d -> "${d.date} " + (d.used?.let { LimitText.of(it) } ?: "no data") }
         }, horizontalArrangement = Arrangement.spacedBy(if (days > 7) 3.dp else 10.dp), verticalAlignment = Alignment.Bottom) {
             range.forEachIndexed { i, d ->
                 val raw = ((grow.value - i * step) / 520f).coerceIn(0f, 1f)
@@ -172,12 +189,18 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                 }
             }
         }
+        }
         val dates = range.map { runCatching { LocalDate.parse(it.date) }.getOrNull() }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
             if (days <= 7) dates.forEach { d -> Text(d?.dayOfWeek?.getDisplayName(java.time.format.TextStyle.NARROW, Locale.ENGLISH) ?: "", fontSize = 11.sp, color = t.faint, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)) }
             else listOf(dates.firstOrNull(), dates.getOrNull(dates.size / 2), dates.lastOrNull()).forEachIndexed { i, d ->
                 Text(d?.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)) ?: "", fontSize = 11.sp, color = t.faint, textAlign = when (i) { 0 -> TextAlign.Start; 1 -> TextAlign.Center; else -> TextAlign.End }, modifier = Modifier.weight(1f))
             }
+        }
+        // How complete the numbers are: usage while the PC was off still counts; only its timing is unknown.
+        range.mapNotNull { it.coverage }.takeIf { it.isNotEmpty() && it.size == range.size }?.let { cov ->
+            Text("This PC observed ${(cov.average() * 100).roundToInt()}% of these $days days. Usage while it was off or asleep is still counted, on the day it next read your usage, so totals stay complete; only the hour it happened is unknown.",
+                fontSize = 11.5.sp, lineHeight = 16.sp, color = t.faint, modifier = Modifier.padding(top = 10.dp))
         }
     } }
 }
@@ -221,7 +244,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                         if (byDate[date] != null) { haptics.performHapticFeedback(HapticFeedbackType.ContextClick); onDay(DayKey(provider.id, history.window, date.toString(), "cal")) }
                     }
                 }
-                .semantics { contentDescription = "Calendar of ${days.size} days. Busiest: " + (days.filter { it.second != null }.maxByOrNull { it.second!! }?.let { "${Days.short(it.first)}, ${pct(it.second!!)}" } ?: "none") }) {
+                .semantics { contentDescription = "Calendar of ${days.size} days. Busiest: " + (days.filter { it.second != null }.maxByOrNull { it.second!! }?.let { "${Days.short(it.first)}, ${LimitText.of(it.second)} of the limit" } ?: "none") }) {
                 val cellW = size.width / weeks; val cellH = size.height / 7f; val gap = 3.dp.toPx(); val corner = CornerRadius(4.dp.toPx())
                 for (w in 0 until weeks) for (d in 0 until 7) {
                     val date = firstWeek.plusDays(w * 7L + d)
@@ -274,7 +297,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
             series.forEach { (p, range) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(9.dp).clip(CircleShape).background(accentOf(p.id))); Spacer(Modifier.width(6.dp))
-                    Text("${p.name} · ${range.mapNotNull { it.used }.takeIf { it.isNotEmpty() }?.let { pct(it.average()) } ?: "—"} a day", fontSize = 12.sp, color = t.muted)
+                    Text("${p.name} · ${range.mapNotNull { it.used }.takeIf { it.isNotEmpty() }?.let { LimitText.of(it.average()) } ?: "—"} a day", fontSize = 12.sp, color = t.muted)
                 }
             }
         }
@@ -319,7 +342,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                 Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${index + 1}", fontSize = 12.sp, color = accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(18.dp))
                     Text("${WEEKDAYS[d]} · ${hourText(h, clock24)}–${hourText((h + 1) % 24, clock24)}", fontSize = 13.sp, color = t.text, modifier = Modifier.weight(1f))
-                    Text(pct(v), fontSize = 13.sp, color = t.muted)
+                    Text("${pct(v)} of the limit", fontSize = 13.sp, color = t.muted)
                 }
             }
         }
@@ -355,16 +378,13 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                     }
                     val date = runCatching { LocalDate.parse(k.date) }.getOrNull()
                     Text(date?.let { Days.long(it) } ?: k.date, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = t.text, modifier = Modifier.padding(top = 6.dp))
-                    Text(insight?.used?.let { pct(it) } ?: "No readings", fontSize = 48.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 6.dp))
+                    Text(insight?.used?.let { LimitText.of(it) } ?: "No readings", fontSize = 48.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 6.dp))
                     insight?.used?.let { used ->
-                        Text("of the limit used that day", fontSize = 12.sp, color = t.faint)
+                        Text(listOfNotNull("of the ${label.lowercase()} limit", LimitText.coverage(insight.coverage)).joinToString(" · "), fontSize = 12.sp, color = t.faint)
                         Spacer(Modifier.height(14.dp))
-                        insight.average?.let { avg ->
-                            val diff = ((used - avg) * 100).roundToInt()
-                            DayFact("Your average", pct(avg), when { diff > 0 -> "+$diff"; diff < 0 -> "$diff"; else -> "±0" } + " pts")
-                        }
+                        insight.average?.let { avg -> DayFact("Compared with usual", LimitText.compared(used, avg), "than your ${LimitText.of(avg)} average") }
                         insight.rank?.let { DayFact("Rank", "#$it", "of ${insight.recorded} days") }
-                        insight.others.take(4).forEach { (name, window, value) -> DayFact("$name · $window", value?.let { pct(it) } ?: "—", null) }
+                        insight.others.take(4).forEach { (name, window, value) -> DayFact("$name · $window", value?.let { LimitText.of(it) } ?: "—", null) }
                     }
                 }
             }

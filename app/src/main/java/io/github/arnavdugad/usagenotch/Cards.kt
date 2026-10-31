@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.outlined.*
@@ -29,6 +30,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import kotlin.math.cos
@@ -183,7 +185,10 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
         Row(Modifier.clip(RoundedCornerShape(14.dp)).then(if (onOpen != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open ${p.name} details") { onOpen() } else Modifier), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(36.dp).clip(com.kyant.shapes.RoundedRectangle(11.dp)).background(innerSurface()), contentAlignment = Alignment.Center) { Logo(p.id, Modifier.size(20.dp)) }
             Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
-                Text(p.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = t.text)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    p.plan?.let { Spacer(Modifier.width(8.dp)); PlanBadge(it) }
+                }
                 val updated = p.updatedAt ?: p.windows.maxOfOrNull { it.at }
                 Text(listOfNotNull(updated?.let { ClockText.updated(it, now, clock24) }, p.account).joinToString(" · "), fontSize = 11.5.sp, color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -194,13 +199,49 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
         if (p.windows.isNotEmpty() || p.extras.isNotEmpty()) Spacer(Modifier.height(12.dp))
         p.windows.forEachIndexed { index, w -> WindowRow(w, index, now, remaining, clock24, reduced, budgets.firstOrNull { it.window == w.id }, offline && !preview); if (index < p.windows.lastIndex || p.extras.isNotEmpty()) Spacer(Modifier.height(8.dp)) }
         p.extras.forEachIndexed { index, e ->
-            Panel(Modifier.fillMaxWidth(), 18.dp, innerSurface()) { Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(e.label, fontSize = 13.5.sp, color = t.text, modifier = Modifier.weight(1f))
-                Text(amountText(e.usedAmount, e.limitAmount, e.unit, null).ifBlank { "No cap" }, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = t.muted)
-            } }
+            ExtraRow(e, now, clock24)
             if (index < p.extras.lastIndex) Spacer(Modifier.height(8.dp))
         }
     } }
+}
+
+/** The subscription, quietly: "Max 5×", "Edu", "Plus". */
+@Composable fun PlanBadge(plan: String, modifier: Modifier = Modifier) {
+    val t = LocalTokens.current
+    Text(plan, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = t.muted, maxLines = 1,
+        modifier = modifier.clip(RoundedCornerShape(7.dp)).background(innerSurface()).border(1.dp, t.hairline, RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 2.dp)
+            .semantics { contentDescription = "Plan: $plan" })
+}
+
+/**
+ * Something reported without a percentage: pay-as-you-go spend ("$3.50 used"), a bought credit balance ("12 credits left"),
+ * or a free limit reset waiting to be used. Informative, so it's a row with words rather than a bar.
+ */
+@Composable fun ExtraRow(e: Extra, now: Long, clock24: Boolean) {
+    val t = LocalTokens.current
+    val (value, note) = extraText(e)
+    Panel(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, 18.dp, innerSurface()) { Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(e.label, fontSize = 13.5.sp, color = t.text, modifier = Modifier.weight(1f).padding(end = 8.dp))
+            Text(value, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = t.muted, textAlign = TextAlign.End)
+        }
+        note?.let { Text(it, fontSize = 11.5.sp, color = t.faint, modifier = Modifier.padding(top = 3.dp)) }
+        // Spend with an amount can renew (monthly API spend); information rows say their own dates in the note.
+        if (e.usedAmount != null) e.reset?.takeIf { it > now }?.let { Text(ClockText.resetsAt(it, now, clock24), fontSize = 11.5.sp, color = t.faint, modifier = Modifier.padding(top = 2.dp)) }
+    } }
+}
+
+/**
+ * The value and note of an information row. With an amount: "$3.50 used" and the provider's detail. Without one, the
+ * detail's first part is the value and the rest the note: "Free limit reset" → "Full reset (Weekly + 5 hr)" and
+ * "use by Nov 7 · redeem it in Codex".
+ */
+fun extraText(e: Extra): Pair<String, String?> {
+    val amount = amountText(e.usedAmount, e.limitAmount, e.unit, null)
+    if (amount.isNotBlank()) return amount to e.detail
+    val detail = e.detail ?: return "No cap" to null
+    val parts = detail.split(" · ", limit = 2)
+    return parts[0] to parts.getOrNull(1)?.replaceFirstChar { it.uppercase() }
 }
 
 /** One limit: label and percentage, a colour-graded bar with the budget tick, then the reset and the pace. */
@@ -234,6 +275,9 @@ internal fun secondaryOf(p: Provider, remaining: Boolean, now: Long): String? {
             budgetShown?.takeIf { !renewed }?.let { b -> val x = size.width * b; drawLine(t.ink, Offset(x, -3.dp.toPx()), Offset(x, size.height + 3.dp.toPx()), 2.dp.toPx(), StrokeCap.Round) }
         }
         Text(if (renewed) "Awaiting a new reading" else if (w.reset == null) "Reset time not reported" else ClockText.resetsAt(w.reset, now, clock24) + " · " + ClockText.countdown(w.reset, now), fontSize = 11.5.sp, color = t.muted)
+        // Amounts for limits counted in money or credits: "30 of 150 credits", "$249.99 of $250"; and the provider's note.
+        val amount = amountText(w.usedAmount, w.limitAmount, w.unit, null)
+        if (amount.isNotBlank() || w.detail != null) Text(listOfNotNull(amount.ifBlank { null }, w.detail).joinToString(" · "), fontSize = 11.5.sp, color = t.faint, modifier = Modifier.padding(top = 2.dp))
         if (!renewed && estimate != null) EstimateLine(estimate, remaining, Modifier.padding(top = 4.dp))
         if (!renewed) {
             budget?.let { Budgets.status(it, w, now, clock24) }?.let { st ->

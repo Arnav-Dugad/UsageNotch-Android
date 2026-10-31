@@ -63,7 +63,7 @@ class PhoneLinkTest {
             assertEquals("Resets tomorrow at 2:13 PM", ClockText.resetsAt(now + 86_400_000, now))
             assertEquals("Updated just now", ClockText.updated(now - 10_000, now))
             assertEquals("Updated 4 min ago", ClockText.updated(now - 240_000, now))
-            assertEquals("$3.50 of $20.00", amountText(3.5, 20.0, "USD", null))
+            assertEquals("$3.50 of $20", amountText(3.5, 20.0, "USD", null))
             assertEquals("Pay-as-you-go", amountText(null, null, null, "Pay-as-you-go"))
         } finally { TimeZone.setDefault(original) }
     }
