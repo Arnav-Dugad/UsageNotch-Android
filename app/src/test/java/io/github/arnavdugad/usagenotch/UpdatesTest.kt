@@ -45,4 +45,14 @@ class UpdatesTest {
         assertNull("oversized", Updates.parseRelease(json.replace("3836186", (Updates.MAX_APK_BYTES + 1).toString())))
         assertNull("no version", Updates.parseRelease("""{"tag_name":"latest","assets":[]}"""))
     }
+
+    @Test fun releasePageRedirectGivesTheVersionWhenTheApiIsRateLimited() {
+        val r = Updates.releaseFromTagUrl("https://github.com/Arnav-Dugad/UsageNotch-Android/releases/tag/v1.7.1")!!
+        assertEquals("1.7.1", r.version)
+        assertEquals("https://github.com/Arnav-Dugad/UsageNotch-Android/releases/download/v1.7.1/UsageNotch-1.7.1.apk", r.apkUrl)
+        assertEquals("https://github.com/Arnav-Dugad/UsageNotch-Android/releases/download/v1.7.1/SHA256SUMS.txt", r.sumsUrl)
+        assertTrue(Updates.allowedUrl(r.apkUrl) && Updates.allowedUrl(r.sumsUrl))
+        assertNull(Updates.releaseFromTagUrl("https://github.com/Arnav-Dugad/UsageNotch-Android/releases"))
+        assertNull(Updates.releaseFromTagUrl(null))
+    }
 }

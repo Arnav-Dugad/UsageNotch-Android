@@ -130,19 +130,40 @@ object Updates {
         throw IOException("Too many redirects")
     }
 
-    /** Asks GitHub for the latest release, at most twice a day unless [force]. */
+    /** Thrown when GitHub couldn't be asked at all, so the app never claims to be up to date without knowing. */
+    class CheckFailed(message: String) : IOException(message)
+
+    /**
+     * Asks GitHub for the latest release, at most twice a day unless [force]. The release API allows only 60 requests an
+     * hour per network (a campus or office can use that up), so when it refuses, the release page's redirect gives the
+     * version instead and the assets come from their standard download links. Checksum and signature checks are the same.
+     */
     suspend fun check(context: Context, force: Boolean = false): Release? = withContext(Dispatchers.IO) {
         val prefs = Repository(context).prefs; val now = System.currentTimeMillis()
         if (!enabled(context)) return@withContext null
         if (!force && now - prefs.getLong("updateChecked", 0) in 0..43_200_000) return@withContext stored(context)
-        prefs.edit().putLong("updateChecked", now).apply()
-        runCatching {
+        val release = runCatching {
             val c = open(API)
-            val release = try { parseRelease(c.inputStream.use { String(readBounded(it, 262_144), Charsets.UTF_8) }) } finally { c.disconnect() }
-            if (release != null) prefs.edit().putString("latestVersion", release.version).putString("latestApk", release.apkUrl).putLong("latestSize", release.apkSize)
-                .putString("latestSums", release.sumsUrl).putString("latestName", release.apkName).apply()
-            release
-        }.getOrNull()
+            try { parseRelease(c.inputStream.use { String(readBounded(it, 262_144), Charsets.UTF_8) }) } finally { c.disconnect() }
+        }.getOrNull() ?: runCatching { fromReleasePage() }.getOrNull()
+            ?: throw CheckFailed("Couldn't reach GitHub to check for updates. Try again later.")
+        prefs.edit().putLong("updateChecked", now).putString("latestVersion", release.version).putString("latestApk", release.apkUrl).putLong("latestSize", release.apkSize)
+            .putString("latestSums", release.sumsUrl).putString("latestName", release.apkName).apply()
+        release
+    }
+
+    /** The latest version from github.com/…/releases/latest, which redirects to …/releases/tag/vX.Y.Z and isn't rate-limited. */
+    private fun fromReleasePage(): Release? {
+        val c = URL(RELEASES).openConnection() as HttpsURLConnection
+        c.connectTimeout = 10_000; c.readTimeout = 15_000; c.instanceFollowRedirects = false
+        val location = try { c.responseCode; c.getHeaderField("Location") } finally { c.disconnect() }
+        return releaseFromTagUrl(location)
+    }
+
+    internal fun releaseFromTagUrl(location: String?): Release? {
+        val tag = Regex("/releases/tag/v(\\d{1,4}\\.\\d{1,4}\\.\\d{1,4})$").find(location ?: return null)?.groupValues?.get(1) ?: return null
+        val base = "https://github.com/Arnav-Dugad/UsageNotch-Android/releases/download/v$tag/"
+        return Release(tag, base + "UsageNotch-$tag.apk", -1, base + "SHA256SUMS.txt", "UsageNotch-$tag.apk")
     }
     private fun stored(context: Context): Release? {
         val p = Repository(context).prefs
@@ -187,21 +208,22 @@ object Updates {
             try { checksumFor(c.inputStream.use { String(readBounded(it, 16_384), Charsets.UTF_8) }, release.apkName) } finally { c.disconnect() }
         } ?: throw IOException("The release has no checksum for the download.")
         val file = File(dir, release.apkName)
-        if (!(file.length() == release.apkSize && file.inputStream().use { sha256(it) } == expected)) {
+        if (!(file.exists() && (release.apkSize <= 0 || file.length() == release.apkSize) && file.inputStream().use { sha256(it) } == expected)) {
             val c = open(release.apkUrl)
             try {
                 val length = c.contentLengthLong
-                if (length > MAX_APK_BYTES || (length > 0 && length != release.apkSize)) throw IOException("The download has an unexpected size.")
+                if (length > MAX_APK_BYTES || (length > 0 && release.apkSize > 0 && length != release.apkSize)) throw IOException("The download has an unexpected size.")
+                val size = if (release.apkSize > 0) release.apkSize else if (length > 0) length else MAX_APK_BYTES.toLong()
                 val partial = File(dir, release.apkName + ".part")
                 c.inputStream.use { input -> partial.outputStream().use { out ->
                     val buffer = ByteArray(64 * 1024); var total = 0L
                     while (true) {
                         val n = input.read(buffer); if (n < 0) break
-                        total += n; if (total > MAX_APK_BYTES || total > release.apkSize) throw IOException("The download is larger than the release.")
-                        out.write(buffer, 0, n); onProgress((total.toFloat() / release.apkSize).coerceIn(0f, 1f))
+                        total += n; if (total > MAX_APK_BYTES || total > size) throw IOException("The download is larger than the release.")
+                        out.write(buffer, 0, n); onProgress((total.toFloat() / size).coerceIn(0f, 1f))
                     }
                 } }
-                if (partial.length() != release.apkSize) { partial.delete(); throw IOException("The download was incomplete.") }
+                if ((release.apkSize > 0 && partial.length() != release.apkSize) || (length > 0 && partial.length() != length)) { partial.delete(); throw IOException("The download was incomplete.") }
                 partial.renameTo(file)
             } finally { c.disconnect() }
         }
