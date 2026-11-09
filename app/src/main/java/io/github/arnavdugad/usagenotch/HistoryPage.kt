@@ -387,7 +387,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                     Text(date?.let { Days.long(it) } ?: k.date, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = t.text, modifier = Modifier.padding(top = 6.dp))
                     Text(insight?.used?.let { LimitText.of(it) } ?: "No readings", fontSize = 48.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 6.dp))
                     insight?.used?.let { used ->
-                        Text(listOfNotNull("of the ${label.lowercase()} limit", LimitText.coverage(insight.coverage)).joinToString(" · "), fontSize = 12.sp, color = t.faint)
+                        Text(listOfNotNull("of the ${LimitText.name(label)} limit", LimitText.coverage(insight.coverage)).joinToString(" · "), fontSize = 12.sp, color = t.faint)
                         Spacer(Modifier.height(14.dp))
                         insight.average?.let { avg -> DayFact("Compared with usual", LimitText.compared(used, avg), "than your ${LimitText.of(avg)} average") }
                         insight.rank?.let { DayFact("Rank", "#$it", "of ${insight.recorded} days") }

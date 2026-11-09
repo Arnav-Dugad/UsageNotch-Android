@@ -378,9 +378,20 @@ object LimitText {
         fraction >= MULTIPLE -> "%.1f".format(Locale.US, fraction).removeSuffix(".0") + "×"
         else -> "${(fraction * 100).roundToInt()}%"
     }
-    /** "5.6 full current session limits' worth" or "of one current session limit". */
+    /** The limit's name as it reads in a sentence, as on Windows: "session", "weekly", "5-hour", "monthly". */
+    fun name(label: String): String {
+        var name = when (label.trim()) { "Current session" -> "session"; "All models" -> "weekly"; else -> label.trim() }
+        for (suffix in listOf(" window", " limit")) if (name.endsWith(suffix, ignoreCase = true)) name = name.dropLast(suffix.length)
+        name = name.replace(" · ", " ")
+        return when {
+            name.isEmpty() -> "usage"
+            name[0].isUpperCase() && (name.length == 1 || !name[1].isUpperCase()) -> name[0].lowercaseChar() + name.substring(1)
+            else -> name
+        }
+    }
+    /** "5.6 full session limits' worth" or "of one session limit". */
     fun worth(fraction: Double?, label: String): String {
-        val name = label.lowercase(Locale.ENGLISH)
+        val name = name(label)
         return if (fraction != null && fraction >= MULTIPLE) "%.1f".format(Locale.US, fraction).removeSuffix(".0") + " full $name limits' worth" else "of one $name limit"
     }
     /** "1.6× more" or "30% less" than the average. */

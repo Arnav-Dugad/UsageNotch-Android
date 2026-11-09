@@ -172,7 +172,7 @@ object Recap {
             val week = h.days.filter { runCatching { LocalDate.parse(it.date) }.getOrNull()?.let { d -> !d.isAfter(today) && d.isAfter(today.minusDays(7)) } == true }
             val used = week.mapNotNull { it.used }
             if (used.isEmpty()) continue
-            lines += "${p.name} ${LimitText.of(used.sum())} ${if (used.sum() >= LimitText.MULTIPLE) "the" else "of the"} ${h.label.lowercase(Locale.ENGLISH)} limit"
+            lines += "${p.name} ${LimitText.of(used.sum())} ${if (used.sum() >= LimitText.MULTIPLE) "the" else "of the"} ${LimitText.name(h.label)} limit"
             week.filter { it.used != null }.maxByOrNull { it.used!! }?.let { d -> if (busiest == null || d.used!! > busiest!!.second) busiest = LocalDate.parse(d.date) to d.used!! }
             streak = maxOf(streak, h.streak)
         }

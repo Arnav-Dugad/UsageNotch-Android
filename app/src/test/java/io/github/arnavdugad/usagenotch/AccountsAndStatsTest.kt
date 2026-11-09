@@ -64,8 +64,11 @@ class AccountsAndStatsTest {
         // Up to 105% stays a percentage, as on Windows 2.8: a full limit is "100%", never "1×".
         assertEquals("100%", LimitText.of(1.0)); assertEquals("104%", LimitText.of(1.04)); assertEquals("1.1×", LimitText.of(1.05))
         assertEquals("100% of the limit", LimitText.ofLimit(1.0)); assertEquals("1.6× the limit", LimitText.ofLimit(1.6))
-        assertEquals("5.6 full current session limits' worth", LimitText.worth(5.61, "Current session"))
-        assertEquals("of one current session limit", LimitText.worth(.4, "Current session"))
+        assertEquals("5.6 full session limits' worth", LimitText.worth(5.61, "Current session"))
+        assertEquals("of one session limit", LimitText.worth(.4, "Current session"))
+        assertEquals("of one weekly limit", LimitText.worth(.4, "All models"))
+        assertEquals("of one 5-hour limit", LimitText.worth(.4, "5-hour limit"))
+        assertEquals("GPT-5.3-Codex-Spark Weekly", LimitText.name("GPT-5.3-Codex-Spark · Weekly window"))
         assertEquals("1.6× more", LimitText.compared(1.28, .8)); assertEquals("30% less", LimitText.compared(.56, .8))
         assertEquals("92% of the day observed", LimitText.coverage(.92))
     }

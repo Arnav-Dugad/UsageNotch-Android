@@ -157,7 +157,7 @@ fun tokenFacts(source: TokenSource): String? {
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
         Title(Icons.Outlined.PieChartOutline, "Unused capacity", "${periods.size} periods")
         Text("${(unused * 100).roundToInt()}% left unused", fontSize = 26.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 8.dp))
-        Text("on average, when the ${history.label.lowercase()} limit renewed", fontSize = 12.sp, color = t.faint)
+        Text("on average, when the ${LimitText.name(history.label)} limit renewed", fontSize = 12.sp, color = t.faint)
         Canvas(Modifier.padding(top = 12.dp).fillMaxWidth().height(78.dp).semantics { contentDescription = "Peak use of the last ${periods.size} periods: " + periods.joinToString { "${(it.peak * 100).roundToInt()}%" } }) {
             val gap = 5.dp.toPx(); val bw = (size.width - gap * (periods.size - 1)) / periods.size; val r = CornerRadius(5.dp.toPx())
             periods.forEachIndexed { i, period ->
