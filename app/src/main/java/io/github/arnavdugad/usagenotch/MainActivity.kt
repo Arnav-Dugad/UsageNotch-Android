@@ -159,6 +159,10 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     var stored by remember { mutableStateOf(StoredHistory.Empty) }; var storedStats by remember { mutableStateOf<StoredStats?>(null) }
     var storedVersion by remember { mutableIntStateOf(0) }; var deleteHistory by remember { mutableStateOf(false) }; var dataNote by remember { mutableStateOf("") }
     var whatsNew by remember { mutableStateOf(WhatsNew.pending(context)) }
+    // Your day notes (this phone's, the PC's merged in), sample-mode notes kept in memory, and the score explanation.
+    var notes by remember { mutableStateOf(emptyMap<String, String>()) }; var demoNotes by remember { mutableStateOf(mapOf(java.time.LocalDate.now().minusDays(2).toString() to "Big refactor")) }
+    var scoreSheet by remember { mutableStateOf(false) }
+    var projectBudgetVersion by remember { mutableIntStateOf(0) }; var demoProjectBudgets by remember { mutableStateOf(emptyMap<String, Long?>()) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val pageStates = List(TABS.size) { rememberLazyListState() }
     val listState = pageStates[0]
@@ -204,7 +208,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
         }
     }
     LaunchedEffect(snapshot?.generatedAt, storedVersion) {
-        withContext(Dispatchers.IO) { runCatching { LocalHistory.open(context) { it.load() to it.stats() } }.getOrNull() }?.let { (h, st) -> stored = h; storedStats = st }
+        withContext(Dispatchers.IO) { runCatching { LocalHistory.open(context) { Triple(it.load(), it.stats(), it.notes()) } }.getOrNull() }?.let { (h, st, n) -> stored = h; storedStats = st; notes = n }
     }
     val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) scope.launch {
@@ -258,6 +262,26 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
         Color(if (demo && providerKind(id) in demoAccents) demoAccents[providerKind(id)] ?: Accents.default(id) else Accents.of(repo.prefs, id)) } } }
     fun budgetsFor(id: String) = budgets.filter { it.provider == id }
     val day = DayKey.decode(dayOpen)
+    val shownNotes = if (demo) demoNotes else notes
+    /** Saves a note here at once, then sends it to the PC when it's on this network. Sample mode keeps notes in memory. */
+    val onNote: (String, String) -> Unit = { date, text ->
+        if (demo) demoNotes = (demoNotes + (date to DayNotes.clean(text))).filterValues { it.isNotEmpty() }
+        else scope.launch {
+            withContext(Dispatchers.IO) { runCatching { LocalHistory.open(context) { it.setNote(date, text) } } }
+            storedVersion++
+            try { repo.syncNotes() } catch (_: Exception) { }
+            storedVersion++
+        }
+    }
+    val projectBudgets = remember(demo, projectBudgetVersion, demoProjectBudgets, snapshot?.has("settings")) {
+        ProjectBudgetHooks(
+            of = { source, project, fromPc -> if (demo) (if (ProjectBudgets.key(source, project) in demoProjectBudgets) demoProjectBudgets[ProjectBudgets.key(source, project)] else fromPc) else ProjectBudgets.of(repo.prefs, source, project, fromPc) },
+            set = when {
+                demo -> { source, project, tokens -> demoProjectBudgets = demoProjectBudgets + (ProjectBudgets.key(source, project) to tokens) }
+                snapshot?.has("settings") == true -> { source, project, tokens -> ProjectBudgets.set(repo.prefs, source, project, tokens); projectBudgetVersion++; syncSoon() }
+                else -> null
+            })
+    }
     val historyProviders = remember(demo, providers, snapshot, stored) { if (demo) providers else LocalHistory.enrich(snapshot?.providers.orEmpty(), stored) }
 
     // Back from History, Widgets or Settings returns to Overview; the page shrinks with the predictive back gesture.
@@ -308,7 +332,13 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                     else CompositionLocalProvider(LocalRingShare provides share) {
                         AnimatedContent(targetState = page, transitionSpec = {
                             if (reduced) fadeIn(snap()) togetherWith fadeOut(snap())
-                            else (fadeIn(tween(220)) + slideInHorizontally(spring(dampingRatio = .9f, stiffness = 500f)) { (if (targetState > initialState) 1 else -1) * it / 10 }) togetherWith fadeOut(tween(120))
+                            // The same spring as the glass tab bar's drop, on Windows and here, so the page follows the selection.
+                            else {
+                                val dir = if (targetState > initialState) 1 else -1
+                                (fadeIn(tween(DesignTokens.Motion.fastMs)) + slideInHorizontally(spring(DesignTokens.Motion.drop.first, DesignTokens.Motion.drop.second)) { dir * it / 6 } +
+                                    scaleIn(spring(DesignTokens.Motion.snappy.first, DesignTokens.Motion.snappy.second), initialScale = .985f)) togetherWith
+                                    (fadeOut(tween(120)) + slideOutHorizontally(spring(DesignTokens.Motion.snappy.first, DesignTokens.Motion.snappy.second)) { -dir * it / 12 })
+                            }
                         }, label = "Page transition", modifier = Modifier.graphicsLayer {
                             val scale = 1f - pageBack * .06f; scaleX = scale; scaleY = scale; alpha = 1f - pageBack * .25f
                         }) { current ->
@@ -337,12 +367,13 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                                         }
                                                     }
                                                 }
+                                                UsageScores.of(shown)?.let { score -> item(key = "score") { ScoreCard(score, reduced) { scoreSheet = true } } }
                                                 providers.forEach { p -> item(key = "p-${p.id}") {
                                                     ProviderCard(p, now, remaining, clock24, reduced, offline && !demo, demo, openUrl, budgets = budgetsFor(p.id), onOpen = { selected = p.id; detail = p.id })
                                                 } }
                                             }
                                         }
-                                        1 -> historyPage(historyProviders, historyState, clock24, reduced, day, { dayOpen = it.encode() }, shown?.tokens, shown?.report)
+                                        1 -> historyPage(historyProviders, historyState, clock24, reduced, day, { dayOpen = it.encode() }, shown?.tokens, shown?.report, shownNotes, projectBudgets)
                                         2 -> {
                                             item { WidgetPreviews(shown ?: demoSnapshot(), now, t.dark, remaining, clock24, offline && !demo, budgets) }
                                             item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -379,7 +410,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                         }
                     }
                 }
-                DayOverlay(day, historyProviders) { dayOpen = null }
+                DayOverlay(day, historyProviders, shownNotes, onNote) { dayOpen = null }
             }
             }
             }
@@ -402,6 +433,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
         }
         if (busy && !refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().statusBarsPadding().align(Alignment.TopCenter), color = t.accent, trackColor = Color.Transparent)
         WhatsNewSheet(whatsNew, reduced) { whatsNew = false; WhatsNew.markSeen(context) }
+        if (scoreSheet) ScoreSheet(UsageScores.of(shown)) { scoreSheet = false }
         if (scanning) ScannerScreen(reduced, { code -> scanning = false; importPairing { code } }) { scanning = false }
     }
     }
@@ -413,7 +445,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } })
     }
     if (deleteHistory) AlertDialog(onDismissRequest = { deleteHistory = false }, icon = { Icon(Icons.Outlined.DeleteOutline, null) }, title = { Text("Delete history on this phone?") },
-        text = { Text("This removes the ${storedStats?.days ?: 0} days saved on this phone. Your PC keeps its own history, and its last 90 days come back the next time it syncs.") },
+        text = { Text("This removes the ${storedStats?.days ?: 0} days and your notes saved on this phone. Your PC keeps its own history and notes, and they come back the next time it syncs.") },
         confirmButton = { TextButton(onClick = { deleteHistory = false; scope.launch { withContext(Dispatchers.IO) { runCatching { LocalHistory.open(context) { it.clear() } } }; dataNote = "History on this phone deleted"; storedVersion++ } }) { Text("Delete", color = Color(Palette.DANGER)) } },
         dismissButton = { TextButton(onClick = { deleteHistory = false }) { Text("Cancel") } })
     if (disconnect) AlertDialog(onDismissRequest = { disconnect = false }, title = { Text("Disconnect this phone?") }, text = { Text("This clears its pairing and latest readings. History saved on this phone stays until you delete it in Settings → Data, and your Windows history is untouched.") }, confirmButton = { TextButton(onClick = { scope.launch { repo.disconnect(); afterSync(); disconnect = false } }) { Text("Disconnect") } }, dismissButton = { TextButton(onClick = { disconnect = false }) { Text("Cancel") } })
@@ -731,8 +763,9 @@ internal fun demoSnapshot(): Snapshot {
         Provider("claude", "Claude", "Ok", listOf(window("five_hour", "Current session", .27, now + 7_845_000, forecast = Forecast("Estimated 61.4% used at reset", 15.6, 61.4, null, "Consistent pace")), window("seven_day", "All models", .41, now + 231_845_000), window("seven_day_sonnet", "Sonnet weekly", .12, now + 231_845_000)),
             account = "Sample account", updatedAt = now, manageUrl = "https://claude.ai/settings/usage", session = "five_hour", weekly = "seven_day", plan = "Max 5×",
             breakdown = listOf(Share("Claude Code", 82.0), Share("Claude", 18.0)),
+            plans = listOf(PlanChange(now - 160 * 86_400_000L, "Pro"), PlanChange(now - 41 * 86_400_000L, "Max 5×")),
             extras = listOf(Extra("extra_usage", "Usage credits", "Pay-as-you-go usage after plan limits", null, 3.5, null, "USD")),
-            history = listOf(demoInsights(demoHistory("five_hour", "Current session", 1.0, 3), now, 5 * 3_600_000L, 3).withDemoAllTime(now, 61.4, 158, 171, 23),
+            history = listOf(demoInsights(demoHistory("five_hour", "Current session", 1.0, 3), now, 5 * 3_600_000L, 3).withDemoAllTime(now, 61.4, 158, 171, 23).withDemoUnusual(),
                 demoInsights(demoHistory("seven_day", "All models", .16, 5), now, 7 * 86_400_000L, 5).withDemoAllTime(now, 9.8, 160, 171, 2))),
         Provider("codex", "Codex", "Ok", listOf(window("codex-primary", "5-hour limit", .16, now + 11_400_000), window("codex-secondary", "Weekly limit", .49, now + 401_840_000)), updatedAt = now, manageUrl = "https://chatgpt.com/codex/settings/usage", session = "codex-primary", weekly = "codex-secondary",
             history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11).withDemoAllTime(now, 37.2, 120, 131, 9)), plan = "Plus"),
@@ -742,7 +775,17 @@ internal fun demoSnapshot(): Snapshot {
             extras = listOf(Extra("codex-reset-credits", "Free limit reset", "Full reset (Weekly + 5 hr) · use by " + java.time.LocalDate.now().plusDays(6).format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.ENGLISH)) + " · redeem it in Codex", null, null, null, null))),
     ), "sample", protocol = 2, features = Snapshot.FEATURES.split(',').toSet(),
         incidents = listOf(Incident("claude", "Elevated errors on Claude Opus", "minor", "monitoring", "https://status.claude.com", now - 1_800_000)),
-        tokens = demoTokens(now)).let { it.copy(report = demoReport(it.providers)) }
+        tokens = demoTokens(now)).let { it.copy(report = demoReport(it.providers), score = demoScore(it.providers)) }
+}
+
+/** A sample combined score: each provider's weekly limit (main limit without one), and last week's. */
+internal fun demoScore(providers: List<Provider>): UsageScore? = UsageScores.local(providers)?.let { it.copy(previous = (it.value - 8).coerceAtLeast(0), onPhone = false) }
+
+/** Two sample unusual days: the busiest recorded days, as about twice the usual for their weekday. */
+private fun History.withDemoUnusual(): History {
+    // The busiest day of this week and of the three before, so both the 7 and 30 day charts show one.
+    val busy = listOfNotNull(calendar.takeLast(7).filter { it.used != null }.maxByOrNull { it.used!! }, calendar.takeLast(30).dropLast(7).filter { it.used != null }.maxByOrNull { it.used!! })
+    return copy(unusual = busy.map { UnusualDay(it.date, 2.1, it.used!! / 2.1) })
 }
 
 /** Sample all-time totals: the busiest saved day and figures in the PC's units (limits). */
@@ -779,7 +822,24 @@ internal fun demoReport(providers: List<Provider>): WeekReport {
     val changes = rows.mapNotNull { it.change }
     val headline = if (changes.isEmpty()) "Your week" else changes.average().let { if (it > .1) "A busier week than the last" else if (it < -.1) "A quieter week than the last" else "A steady week" }
     val active = rows.flatMap { p -> providers.first { it.id == p.id }.history.first { it.window == p.window }.range(7).filter { (it.used ?: 0.0) > .0001 }.map { it.date } }.toSet().size
-    return WeekReport(from.toString(), today.toString(), System.currentTimeMillis(), headline, "${from.format(fmt)} – ${today.format(fmt)} · $active active day${if (active == 1) "" else "s"}", rows, lines.take(7))
+    // Typical week: the median of the earlier weeks in the sample history, as the PC works it out.
+    val typed = rows.map { r ->
+        val h = providers.first { it.id == r.id }.history.first { it.window == r.window }
+        val weeks = (1..8).mapNotNull { k -> h.range(7 * (k + 1)).take(7).mapNotNull { it.used }.takeIf { it.size >= 3 }?.sum() }
+        val typical = if (weeks.size >= 3) weeks.sorted()[weeks.size / 2] else null
+        r.copy(typical = typical, typicalChange = typical?.takeIf { it >= .05 }?.let { t -> r.used?.let { (it - t) / t } })
+    }
+    // As on Windows 2.9: the typical-week comparison joins the change sentence; on its own only without a week before.
+    fun typicalText(c: Double) = if (kotlin.math.abs(c) < .1) "close to your typical week" else "${kotlin.math.round(kotlin.math.abs(c) * 100).toInt()}% ${if (c > 0) "above" else "below"} your typical week"
+    typed.forEach { r ->
+        val c = r.typicalChange ?: return@forEach
+        val i = lines.indexOfFirst { it.kind == "change" && it.provider == r.id }
+        if (i >= 0) lines[i] = lines[i].copy(text = lines[i].text.removeSuffix(".") + " (" + typicalText(c) + ").")
+        else lines.add(0, ReportLine("typical", r.id, "Your ${r.name} week was ${typicalText(c)}."))
+    }
+    return WeekReport(from.toString(), today.toString(), System.currentTimeMillis(), headline, "${from.format(fmt)} – ${today.format(fmt)} · $active active day${if (active == 1) "" else "s"}", typed, lines.take(8),
+        coverage = .42, note = "This PC saw 42% of this week, so which day and hour things happened is less certain. Totals are still complete.",
+        notes = listOf(DayNote(today.minusDays(2).toString(), "Big refactor")))
 }
 
 /** Sample protocol 2 insights for a history: 7 days of readings, finished periods, limits reached, reliability, sessions and events. */
@@ -808,8 +868,12 @@ internal fun demoTokens(now: Long): TokenUsage {
     val claude = days(42_000_000, 3); val codex = days(18_000_000, 5)
     return TokenUsage(now, listOf(
         TokenSource("claude", "Claude Code", totals(claude.last().total, claude.last().cost!!), totals(claude.takeLast(7).sumOf { it.total }, claude.takeLast(7).sumOf { it.cost!! }), claude,
-            listOf(TokenShare("UsageNotch-Windows", 96_000_000, 182.0, .46), TokenShare("UsageNotch-Android", 61_000_000, 115.0, .29), TokenShare("Arnav-AI-Website", 31_000_000, 58.0, .15), TokenShare("Orbitarium Website", 21_000_000, 40.0, .10)),
-            listOf(TokenShare("claude-opus-5-5", 176_000_000, 352.0, .84), TokenShare("claude-haiku-5-5", 33_000_000, 4.5, .16))),
+            listOf(TokenShare("UsageNotch-Windows", 96_000_000, 182.0, .46, budget = 100_000_000), TokenShare("UsageNotch-Android", 61_000_000, 115.0, .29, budget = 50_000_000), TokenShare("Arnav-AI-Website", 31_000_000, 58.0, .15), TokenShare("Orbitarium Website", 21_000_000, 40.0, .10)),
+            listOf(TokenShare("claude-opus-5-5", 176_000_000, 352.0, .84), TokenShare("claude-haiku-5-5", 33_000_000, 4.5, .16)),
+            month = TokenMonth(today.withDayOfMonth(1).toString(), 214_000_000, 412.3),
+            plan = PlanPrice("Max 5×", 100.0), perLimit = PerLimit(9_200_000, "session"),
+            modelWeeks = (7 downTo 0).map { k -> val r = java.util.Random(k.toLong()); ModelWeek(today.minusDays(6L + 7 * k).toString(),
+                listOf("claude-opus-5-5" to (120_000_000L + r.nextInt(80_000_000)) * (8 - k) / 8, "claude-sonnet-5-5" to (60_000_000L - k * 6_000_000L).coerceAtLeast(4_000_000L), "claude-haiku-5-5" to 20_000_000L + r.nextInt(15_000_000))) }),
         TokenSource("codex", "Codex", totals(codex.last().total, codex.last().cost!!), totals(codex.takeLast(7).sumOf { it.total }, codex.takeLast(7).sumOf { it.cost!! }), codex,
             listOf(TokenShare("FLD_ML-main", 52_000_000, null, .62), TokenShare("Orbitarium Website", 32_000_000, null, .38)), listOf(TokenShare("gpt-6.1-sol", 84_000_000, null, 1.0))),
     ))

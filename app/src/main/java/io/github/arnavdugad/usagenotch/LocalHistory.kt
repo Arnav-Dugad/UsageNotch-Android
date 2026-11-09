@@ -28,12 +28,53 @@ class StoredHistory(val series: List<StoredSeries>, private val days: Map<Pair<S
  * sends and still works while the PC is off or after you disconnect. Only dates, window ids, provider names and
  * fractions are stored; no account names, tokens or readings.
  */
-class LocalHistory(context: Context) : SQLiteOpenHelper(context.applicationContext, FILE, null, 1) {
+class LocalHistory(context: Context) : SQLiteOpenHelper(context.applicationContext, FILE, null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE days (provider TEXT NOT NULL, window TEXT NOT NULL, date TEXT NOT NULL, used REAL, coverage REAL, updated INTEGER NOT NULL, PRIMARY KEY(provider, window, date))")
         db.execSQL("CREATE TABLE series (provider TEXT NOT NULL, window TEXT NOT NULL, name TEXT NOT NULL, label TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY(provider, window))")
+        createNotes(db)
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    /** Version 2 (1.9) adds your day notes. Saved days are kept. */
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { if (oldVersion < 2) createNotes(db) }
+    private fun createNotes(db: SQLiteDatabase) =
+        db.execSQL("CREATE TABLE IF NOT EXISTS notes (date TEXT PRIMARY KEY, text TEXT NOT NULL, at INTEGER NOT NULL, pending INTEGER NOT NULL DEFAULT 0)")
+
+    /** Every note, deleted ones included, by date. */
+    fun allNotes(): Map<String, StoredNote> = readableDatabase.rawQuery("SELECT date, text, at, pending FROM notes", null).use { c ->
+        buildMap { while (c.moveToNext()) put(c.getString(0), StoredNote(c.getString(0), c.getString(1), c.getLong(2), c.getInt(3) != 0)) }
+    }
+    /** Your notes by date, without deleted ones. */
+    fun notes(): Map<String, String> = allNotes().values.filter { it.text.isNotEmpty() }.associate { it.date to it.text }
+    fun pendingNotes(): List<StoredNote> = allNotes().values.filter { it.pending }
+
+    /** Writes, edits or (with blank [text]) deletes the note for [date] on this phone; it waits as pending for the PC. */
+    fun setNote(date: String, text: String, now: Long = System.currentTimeMillis()): StoredNote {
+        require(validDate(date))
+        val note = StoredNote(date, DayNotes.clean(text), DayNotes.stamp(allNotes()[date], now), pending = true)
+        writeNotes(listOf(note))
+        return note
+    }
+
+    /** Takes the PC's notes (last writer wins, ties to the PC). Returns the dates whose text changed. */
+    fun mergeNotes(incoming: List<DayNote>): Set<String> {
+        if (incoming.isEmpty()) return emptySet()
+        val mine = allNotes()
+        val (merged, changed) = DayNotes.merge(mine, incoming.filter { validDate(it.date) })
+        writeNotes(merged.values.filter { it != mine[it.date] })
+        return changed
+    }
+
+    private fun writeNotes(notes: List<StoredNote>) {
+        if (notes.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            notes.forEach { n ->
+                db.insertWithOnConflict("notes", null, ContentValues().apply { put("date", n.date); put("text", n.text); put("at", n.at); put("pending", if (n.pending) 1 else 0) }, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
 
     /** Saves every day in [snapshot]; returns how many rows were written. The PC's latest value for a date wins, but a day without readings never erases a saved one. */
     fun save(snapshot: Snapshot, now: Long = System.currentTimeMillis()): Int {
@@ -82,7 +123,7 @@ class LocalHistory(context: Context) : SQLiteOpenHelper(context.applicationConte
         c.moveToFirst(); StoredStats(c.getInt(0), c.getInt(1), if (c.isNull(2)) null else c.getString(2))
     }
 
-    /** Writes every saved day as CSV: provider,window,date,used,coverage. Returns the number of rows. */
+    /** Writes every saved day as CSV: provider,window,date,used,coverage, then your notes (date,note). Returns the number of day rows. */
     fun exportCsv(out: Writer): Int {
         out.write("provider,window,date,used,coverage\n")
         var count = 0
@@ -92,12 +133,17 @@ class LocalHistory(context: Context) : SQLiteOpenHelper(context.applicationConte
                 count++
             }
         }
+        val notes = notes().toSortedMap()
+        if (notes.isNotEmpty()) {
+            out.write("\ndate,note\n")
+            notes.forEach { (date, text) -> out.write(date + "," + csvField(text) + "\n") }
+        }
         out.flush()
         return count
     }
 
-    /** Deletes everything saved on this phone. The PC's own history is untouched. */
-    fun clear() { writableDatabase.apply { delete("days", null, null); delete("series", null, null) } }
+    /** Deletes everything saved on this phone, notes included. The PC's own history and notes are untouched. */
+    fun clear() { writableDatabase.apply { delete("days", null, null); delete("series", null, null); delete("notes", null, null) } }
 
     enum class Existing { None, Empty, Value }
 
@@ -122,13 +168,14 @@ class LocalHistory(context: Context) : SQLiteOpenHelper(context.applicationConte
             }
         }
 
+        fun csvField(v: String) = if (v.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + v.replace("\"", "\"\"") + "\"" else v
         fun csvRow(d: StoredDay): String {
-            fun field(v: String) = if (v.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + v.replace("\"", "\"\"") + "\"" else v
+            fun field(v: String) = csvField(v)
             fun num(v: Double?) = v?.let { String.format(Locale.ROOT, "%.4f", it).trimEnd('0').trimEnd('.') } ?: ""
             return listOf(field(d.provider), field(d.window), d.date, num(d.used), num(d.coverage)).joinToString(",") + "\n"
         }
 
-        private fun validDate(date: String) = date.length == 10 && runCatching { LocalDate.parse(date) }.isSuccess
+        internal fun validDate(date: String) = date.length == 10 && runCatching { LocalDate.parse(date) }.isSuccess
 
         /**
          * Saved days with the snapshot's on top, as one unbroken run of dates from the first to the last (missing dates

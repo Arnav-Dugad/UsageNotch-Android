@@ -60,11 +60,11 @@ data class DayKey(val provider: String, val window: String, val date: String, va
  * Everything is recorded on the PC; sections it doesn't send are left out.
  */
 fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, clock24: Boolean, reduced: Boolean, openDay: DayKey?, onDay: (DayKey) -> Unit, tokens: TokenUsage? = null,
-    report: WeekReport? = null) {
+    report: WeekReport? = null, notes: Map<String, String> = emptyMap(), budgets: ProjectBudgetHooks? = null) {
     val withHistory = providers.filter { it.history.isNotEmpty() }
-    report?.let { r -> item(key = "h-week") { ThisWeekCard(r, providers, reduced) } }
+    report?.let { r -> item(key = "h-week") { ThisWeekCard(r, providers, reduced, notes) } }
     if (withHistory.isEmpty()) {
-        tokens?.let { usage -> item(key = "h-tokens") { TokensCard(usage, reduced) } }
+        tokens?.let { usage -> item(key = "h-tokens") { TokensCard(usage, reduced, budgets) } }
         item(key = "h-empty") {
             Notice(if (providers.isEmpty()) "No history yet" else "History comes from your PC",
                 if (providers.isEmpty()) null else "Update UsageNotch on Windows to 2.4 or later.", tone = LocalTokens.current.muted)
@@ -76,12 +76,12 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
     item(key = "h-pickers") { HistoryPickers(withHistory, provider, history, state, reduced) }
     item(key = "h-summary") { SummaryTiles(history, state.days) }
     item(key = "h-share") { ShareWeekButton(providers, tokens, report) }
-    item(key = "h-bars") { DailyBars(provider, history, state.days, reduced, openDay, onDay) }
-    item(key = "h-calendar") { CalendarCard(provider, history, openDay, onDay) }
+    item(key = "h-bars") { DailyBars(provider, history, state.days, reduced, openDay, onDay, notes) }
+    item(key = "h-calendar") { CalendarCard(provider, history, openDay, onDay, notes) }
     (history.allTime ?: LocalHistory.allTime(history.calendar.ifEmpty { history.days }))?.let { all -> item(key = "h-alltime-${provider.id}-${history.window}") { AllTimeCard(provider, history, all, reduced) } }
     if (withHistory.size > 1) item(key = "h-compare") { CompareCard(withHistory, state.days, reduced) }
     if (history.observed.any { it > 0 }) item(key = "h-heat") { Heatmap(provider, history, clock24) }
-    tokens?.let { usage -> item(key = "h-tokens") { TokensCard(usage, reduced) } }
+    tokens?.let { usage -> item(key = "h-tokens") { TokensCard(usage, reduced, budgets) } }
     if (history.unused.isNotEmpty()) item(key = "h-unused-${history.window}") { UnusedCard(provider, history, reduced) }
     if (history.hits.isNotEmpty() || history.reliability != null) item(key = "h-hits-${history.window}") { HitsCard(history, clock24) }
     if (history.reliability != null) item(key = "h-reliability-${history.window}") { ReliabilityCard(history) }
@@ -146,7 +146,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
  * that day's card. Days without readings are short grey marks and can't be opened.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
-@Composable private fun DailyBars(provider: Provider, history: History, days: Int, reduced: Boolean, openDay: DayKey?, onDay: (DayKey) -> Unit) {
+@Composable private fun DailyBars(provider: Provider, history: History, days: Int, reduced: Boolean, openDay: DayKey?, onDay: (DayKey) -> Unit, notes: Map<String, String> = emptyMap()) {
     val t = LocalTokens.current; val accent = LocalAccent.current(provider.id); val shared = LocalSharedScope.current; val haptics = LocalHapticFeedback.current
     val range = history.range(days)
     val recorded = range.mapNotNull { it.used }
@@ -154,8 +154,19 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
     val average = recorded.takeIf { it.isNotEmpty() }?.average()
     val step = when { days > 30 -> 8; days > 7 -> 22; else -> 55 }
     val total = 520 + step * range.size
+    val unusual = history.unusual.associateBy { it.date }
     val grow = remember(history.window, days) { Animatable(if (reduced) total.toFloat() else 0f) }
-    LaunchedEffect(history.window, days, reduced) { if (!reduced) grow.animateTo(total.toFloat(), tween(total, easing = LinearEasing)) else grow.snapTo(total.toFloat()) }
+    // Switching between 7, 30 and 90 days morphs the bars from the old range into the new one instead of redrawing.
+    val last = remember(provider.id, history.window) { mutableStateOf<MorphRange?>(null) }
+    var morphFrom by remember { mutableStateOf<MorphRange?>(null) }
+    val morph = remember { Animatable(1f) }
+    LaunchedEffect(history.window, days, reduced) {
+        val from = last.value; last.value = MorphRange(days, range, max)
+        if (!reduced && from != null && from.days != days) {
+            grow.snapTo(total.toFloat()); morphFrom = from; morph.snapTo(0f)
+            morph.animateTo(1f, spring(dampingRatio = DesignTokens.Motion.snappy.first, stiffness = 140f)); morphFrom = null
+        } else if (!reduced) grow.animateTo(total.toFloat(), tween(total, easing = LinearEasing)) else grow.snapTo(total.toFloat())
+    }
     Panel(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Daily usage", fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = t.text, modifier = Modifier.weight(1f))
@@ -173,7 +184,20 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
         val plate = Modifier.clip(RoundedRectangle(6.dp)).background(t.background.copy(alpha = .78f)).padding(horizontal = 5.dp, vertical = 1.dp)
         if (max >= .9) Text("1 full limit", fontSize = 10.sp, lineHeight = 12.sp, color = t.faint, modifier = Modifier.align(Alignment.TopStart).offset(y = (140 * (1 - 1.0 / max)).dp - 16.dp).zIndex(1f).then(plate))
         average?.let { Text("average ${LimitText.of(it)}", fontSize = 10.sp, lineHeight = 12.sp, color = t.muted, modifier = Modifier.align(Alignment.TopEnd).offset(y = ((140 * (1 - it / max)).dp - 16.dp).coerceAtLeast((-14).dp)).zIndex(1f).then(plate)) }
-        Row(Modifier.fillMaxWidth().height(140.dp).semantics {
+        morphFrom?.let { from ->
+            val gapOf = { d: Int -> when { d > 30 -> 1.dp; d > 7 -> 3.dp; else -> 10.dp } }
+            Canvas(Modifier.fillMaxWidth().height(140.dp)) {
+                val bars = ChartMorph.frame(ChartMorph.layout(from.range, from.max, size.width, gapOf(from.days).toPx()), ChartMorph.layout(range, max, size.width, gapOf(days).toPx()), morph.value)
+                bars.forEach { b ->
+                    if (b.alpha <= .01f) return@forEach
+                    val h = (size.height * b.height).coerceAtLeast(3.dp.toPx())
+                    val color = androidx.compose.ui.graphics.lerp(Color(Palette.usage(b.height.toDouble().coerceIn(0.0, 1.0) * .9)), accent, .25f)
+                    drawRoundRect(Brush.verticalGradient(listOf(color.copy(alpha = b.alpha), color.copy(alpha = .5f * b.alpha)), startY = size.height - h, endY = size.height),
+                        Offset(b.left, size.height - h), Size(b.width, h), CornerRadius(minOf(8.dp.toPx(), b.width / 2)))
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().height(140.dp).graphicsLayer { alpha = if (morphFrom != null) 0f else 1f }.semantics {
             contentDescription = "Daily usage for ${range.size} days, where 100% is one full limit: " + range.joinToString("; ") { d -> "${d.date} " + (d.used?.let { LimitText.of(it) } ?: "no data") }
         }, horizontalArrangement = Arrangement.spacedBy(when { days > 30 -> 1.dp; days > 7 -> 3.dp; else -> 10.dp }), verticalAlignment = Alignment.Bottom) {
             range.forEachIndexed { i, d ->
@@ -186,6 +210,11 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                     else {
                         val color = androidx.compose.ui.graphics.lerp(Color(Palette.usage((used / max).coerceIn(0.0, 1.0) * .9)), accent, .25f)
                         val height = (140 * (used / max).toFloat() * progress).coerceAtLeast(3f).dp
+                        // A dot above a day you wrote a note for; a purple one above an unusually busy day.
+                        val marks = listOfNotNull(Color(Palette.FORECAST).takeIf { d.date in unusual }, t.text.copy(alpha = .7f).takeIf { notes[d.date] != null })
+                        if (marks.isNotEmpty() && progress > .9f) Column(Modifier.align(Alignment.BottomCenter).offset(y = -height - 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            marks.forEach { c -> Box(Modifier.size(if (days > 30) 3.dp else 5.dp).clip(CircleShape).background(c)) }
+                        }
                         androidx.compose.animation.AnimatedVisibility(openDay != key, enter = fadeIn(tween(200)), exit = fadeOut(tween(200))) {
                             val morph = if (shared != null) with(shared) { Modifier.sharedBounds(rememberSharedContentState("day-${key.origin}-${d.date}"), this@AnimatedVisibility) } else Modifier
                             Box(morph.fillMaxWidth().height(height).clip(RoundedRectangle(when { days > 30 -> 1.5.dp; days > 7 -> 3.dp; else -> 8.dp }))
@@ -204,6 +233,10 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                 Text(d?.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)) ?: "", fontSize = 11.sp, color = t.faint, textAlign = when (i) { 0 -> TextAlign.Start; 1 -> TextAlign.Center; else -> TextAlign.End }, modifier = Modifier.weight(1f))
             }
         }
+        if (range.any { it.date in unusual || notes[it.date] != null }) Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (range.any { it.date in unusual }) { Box(Modifier.size(6.dp).clip(CircleShape).background(Color(Palette.FORECAST))); Text("  unusually busy", fontSize = 11.sp, color = t.faint); Spacer(Modifier.width(12.dp)) }
+            if (range.any { notes[it.date] != null }) { Box(Modifier.size(6.dp).clip(CircleShape).background(t.text.copy(alpha = .7f))); Text("  has a note", fontSize = 11.sp, color = t.faint) }
+        }
         // How complete the numbers are: usage while the PC was off still counts; only its timing is unknown.
         range.mapNotNull { it.coverage }.takeIf { it.isNotEmpty() && it.size == range.size }?.let { cov ->
             Text("This PC observed ${(cov.average() * 100).roundToInt()}% of these ${range.size} days. Usage while it was off or asleep is still counted, on the day it next read your usage, so totals stay complete; only the hour it happened is unknown.",
@@ -213,7 +246,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
 }
 
 /** 90 days as a calendar of weeks (columns) by weekday (rows). Outlined days had no readings. Tap a day to open it. */
-@Composable private fun CalendarCard(provider: Provider, history: History, openDay: DayKey?, onDay: (DayKey) -> Unit) {
+@Composable private fun CalendarCard(provider: Provider, history: History, openDay: DayKey?, onDay: (DayKey) -> Unit, notes: Map<String, String> = emptyMap()) {
     val t = LocalTokens.current; val accent = LocalAccent.current(provider.id); val haptics = LocalHapticFeedback.current
     val days = history.calendar.ifEmpty { history.days }.takeLast(90).mapNotNull { d -> runCatching { LocalDate.parse(d.date) to d.used }.getOrNull() }
     if (days.isEmpty()) return
@@ -263,6 +296,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                         drawRoundRect(t.track, topLeft, cellSize, corner)
                         if (used > 0.0001) drawRoundRect(accent.copy(alpha = .22f + .78f * (used / max).toFloat().coerceIn(0f, 1f)), topLeft, cellSize, corner)
                     }
+                    if (notes[date.toString()] != null) drawCircle(t.text.copy(alpha = .75f), 2.dp.toPx(), Offset(topLeft.x + cellSize.width - 3.5.dp.toPx(), topLeft.y + 3.5.dp.toPx()))
                     if (openDay?.origin == "cal" && openDay.date == date.toString()) drawRoundRect(t.text, topLeft, cellSize, corner, style = Stroke(2.dp.toPx()))
                 }
             }
@@ -361,7 +395,7 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
  * compares with your average, its rank, and what the other limits used that day.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
-@Composable fun DayOverlay(key: DayKey?, providers: List<Provider>, onClose: () -> Unit) {
+@Composable fun DayOverlay(key: DayKey?, providers: List<Provider>, notes: Map<String, String> = emptyMap(), onNote: ((String, String) -> Unit)? = null, onClose: () -> Unit) {
     val t = LocalTokens.current; val shared = LocalSharedScope.current
     var last by remember { mutableStateOf(key) }
     if (key != null) last = key
@@ -393,17 +427,61 @@ fun LazyListScope.historyPage(providers: List<Provider>, state: HistoryState, cl
                         insight.rank?.let { DayFact("Rank", "#$it", "of ${insight.recorded} days") }
                         insight.others.take(4).forEach { (name, window, value) -> DayFact("$name · $window", value?.let { LimitText.of(it) } ?: "—", null) }
                     }
+                    provider?.history?.firstOrNull { it.window == k.window }?.unusual?.firstOrNull { it.date == k.date }?.let { u ->
+                        val weekday = date?.dayOfWeek?.getDisplayName(java.time.format.TextStyle.FULL, Locale.ENGLISH) ?: "day"
+                        Row(Modifier.padding(top = 10.dp).clip(RoundedRectangle(12.dp)).background(Color(Palette.FORECAST).copy(alpha = .14f)).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Bolt, null, tint = Color(Palette.FORECAST), modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp))
+                            Text("%.1f".format(Locale.ENGLISH, u.ratio).removeSuffix(".0") + "× your normal $weekday (${LimitText.of(u.typical)} is usual, from the 8 weeks before)", fontSize = 13.sp, lineHeight = 18.sp, color = t.text)
+                        }
+                    }
+                    DayNoteEditor(k.date, notes[k.date], onNote)
                 }
             }
         }
     }
 }
+/** A one-line note for the day: shown with Edit and Delete, or "Add a note". Saved on this phone and synced with your PC. */
+@Composable private fun DayNoteEditor(date: String, note: String?, onNote: ((String, String) -> Unit)?) {
+    val t = LocalTokens.current
+    var editing by remember(date) { mutableStateOf(false) }
+    var text by remember(date, note) { mutableStateOf(note ?: "") }
+    HorizontalDivider(Modifier.padding(top = 12.dp, bottom = 8.dp), color = t.hairline)
+    when {
+        editing && onNote != null -> {
+            OutlinedTextField(text, { text = it.replace('\n', ' ').take(DayNotes.MAX) }, Modifier.fillMaxWidth(), singleLine = true,
+                placeholder = { Text("Big refactor") }, label = { Text("Note") },
+                supportingText = { Text("Add a note, like \"Big refactor\" or \"Exam week\". It shows on History, in This week and on your PC. ${text.length}/${DayNotes.MAX}", fontSize = 11.sp, lineHeight = 14.sp) })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { editing = false; text = note ?: "" }) { Text("Cancel") }
+                TextButton(onClick = { onNote(date, text); editing = false }) { Text("Save") }
+            }
+        }
+        note != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.EditNote, null, tint = t.accent, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+            Text(note, fontSize = 14.sp, color = t.text, modifier = Modifier.weight(1f))
+            if (onNote != null) {
+                IconButton(onClick = { editing = true }, Modifier.size(36.dp)) { Icon(Icons.Outlined.Edit, "Edit note", tint = t.muted, modifier = Modifier.size(18.dp)) }
+                IconButton(onClick = { onNote(date, "") }, Modifier.size(36.dp)) { Icon(Icons.Outlined.DeleteOutline, "Delete note", tint = t.muted, modifier = Modifier.size(18.dp)) }
+            }
+        }
+        onNote != null -> TextButton(onClick = { editing = true }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+            Icon(Icons.Outlined.EditNote, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Add a note")
+        }
+    }
+}
+
+/** The bars a chart showed, so the next range can morph from them. */
+class MorphRange(val days: Int, val range: List<Day>, val max: Double)
+
 @Composable private fun DayFact(label: String, value: String, note: String?) {
     val t = LocalTokens.current
-    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f), maxLines = 1)
-        Text(value, fontSize = 14.sp, color = t.text, fontWeight = FontWeight.SemiBold)
-        note?.let { Text("  $it", fontSize = 12.sp, color = t.faint) }
+    // The note goes under the figure, so a long one never runs into the label.
+    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).semantics(mergeDescendants = true) {}) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 13.sp, color = t.muted, modifier = Modifier.weight(1f).padding(end = 12.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text(value, fontSize = 14.sp, color = t.text, fontWeight = FontWeight.SemiBold)
+        }
+        note?.let { Text(it, fontSize = 12.sp, color = t.faint, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth()) }
     }
 }
 

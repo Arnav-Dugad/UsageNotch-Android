@@ -38,7 +38,7 @@ internal fun tokens(n: Long): String = when {
     n >= 1_000 -> "%.1fk".format(Locale.ENGLISH, n / 1e3)
     else -> n.toString()
 }
-internal fun dollars(v: Double): String = if (v >= 100) "$" + v.roundToInt() else "$" + "%.2f".format(Locale.ENGLISH, v)
+internal fun dollars(v: Double): String = if (v >= 100) "$" + "%,d".format(Locale.ENGLISH, v.roundToInt()) else "$" + "%.2f".format(Locale.ENGLISH, v)
 private fun duration(ms: Long): String { val m = (ms / 60_000).coerceAtLeast(0); return when { m < 60 -> "$m min"; m % 60 == 0L -> "${m / 60} h"; else -> "${m / 60} h ${m % 60} min" } }
 private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if (clock24) "EEE HH:mm" else "EEE h:mm a", Locale.ENGLISH).withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(at))
 
@@ -62,7 +62,10 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
  * Tokens the coding tools on your PC recorded (Claude Code, Codex): today and this week, what that would cost at API
  * prices (an equivalent, not what your plan charges), 30 days of totals, and where they went by project and model.
  */
-@Composable fun TokensCard(usage: TokenUsage, reduced: Boolean) {
+/** How the tokens card reads and changes project budgets: the budget in effect, and a setter (null in sample mode). */
+class ProjectBudgetHooks(val of: (source: String, project: String, fromPc: Long?) -> Long?, val set: ((source: String, project: String, tokens: Long?) -> Unit)?)
+
+@Composable fun TokensCard(usage: TokenUsage, reduced: Boolean, budgets: ProjectBudgetHooks? = null) {
     val t = LocalTokens.current
     val sources = usage.sources.filter { it.today != null || it.week != null || it.days.isNotEmpty() }
     if (sources.isEmpty()) return
@@ -84,6 +87,7 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
                 } }
             }
         }
+        TokenValueTiles(source)
         if (source.allDevices) tokenFacts(source)?.let { Text(it, fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(top = 10.dp)) }
         val days = source.days.takeLast(30)
         if (days.isNotEmpty()) {
@@ -98,23 +102,36 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
                 }
             }
         }
-        @Composable fun Shares(title: String, list: List<TokenShare>) {
+        ModelMixChart(source, accent, reduced)
+        var editing by remember(source.id) { mutableStateOf<TokenShare?>(null) }
+        @Composable fun Shares(title: String, list: List<TokenShare>, projects: Boolean) {
             if (list.isEmpty()) return
-            Text(title, fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+            Row(Modifier.padding(top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontSize = 12.sp, color = t.muted, modifier = Modifier.weight(1f))
+                if (projects && budgets?.set != null) Text("Tap a project for a weekly budget", fontSize = 11.sp, color = t.faint)
+            }
             list.forEach { s ->
-                Column(Modifier.padding(vertical = 5.dp).semantics(mergeDescendants = true) {}) {
+                val budget = if (projects) (if (budgets != null) budgets.of(source.id, s.name, s.budget) else s.budget) else null
+                val clickable = if (projects && budgets?.set != null) Modifier.clickable(onClickLabel = "Set a weekly budget for ${s.name}") { editing = s } else Modifier
+                Column(clickable.padding(vertical = 5.dp).semantics(mergeDescendants = true) {}) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(s.name, fontSize = 13.sp, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         Text("${(s.share * 100).roundToInt()}% · ${tokens(s.total)}" + (s.cost?.let { " · ${dollars(it)}" } ?: ""), fontSize = 12.sp, color = t.muted)
                     }
-                    Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(4.dp).clip(CircleShape).background(t.track)) {
-                        Box(Modifier.fillMaxWidth((s.share * grow).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(CircleShape).background(accent))
+                    if (budget != null) Text("${s.name} budget · ${tokens(s.total)} of ${tokens(budget)} this week", fontSize = 11.5.sp, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                    // With a budget the bar shows how much of it is used, in the usage colours; otherwise the project's share.
+                    val fill = if (budget != null) ProjectBudgets.progress(s.total, budget) else s.share
+                    val color = if (budget != null) Color(Palette.usage(fill.coerceIn(0.0, 1.0))) else accent
+                    Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(if (budget != null) 6.dp else 4.dp).clip(CircleShape).background(t.track)) {
+                        Box(Modifier.fillMaxWidth((fill * grow).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(CircleShape).background(color))
                     }
+                    if (budget != null && fill >= .8) Text(if (fill >= 1) "Over this week's budget" else "${(fill * 100).roundToInt()}% of this week's budget", fontSize = 11.sp, color = Color(Palette.readable(if (fill >= 1) Palette.DANGER else Palette.WARNING, if (t.dark) 0xFF151922.toInt() else 0xFFFFFFFF.toInt())), modifier = Modifier.padding(top = 2.dp))
                 }
             }
         }
-        Shares("Projects · 7 days", source.projects)
-        Shares("Models · 7 days", source.models)
+        Shares("Projects · 7 days", source.projects, projects = true)
+        Shares("Models · 7 days", source.models, projects = false)
+        editing?.let { s -> ProjectBudgetDialog(s.name, (if (budgets != null) budgets.of(source.id, s.name, s.budget) else s.budget), s.total, { tokens -> budgets?.set?.invoke(source.id, s.name, tokens); editing = null }) { editing = null } }
         Text(if (source.allDevices) "Totals come from OpenAI for this account, across every device. Projects and models come from the Codex transcripts on this PC."
             else "From the transcripts Claude Code and Codex keep on your PC. API-price equivalent: what these tokens would cost on the pay-as-you-go API, not what your plan charges.", fontSize = 11.sp, color = t.faint, modifier = Modifier.padding(top = 10.dp))
     } }

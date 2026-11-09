@@ -1,0 +1,67 @@
+{
+  "schema": 1, "protocol": 2, "generatedAt": 1790000000000,
+  "features": ["refresh","settings","trend","insights","tokens","incidents","accounts","report","alltime","score","notes","plans","tokens2"],
+  "score": { "value": 46, "previous": 38,
+    "providers": [
+      { "id": "claude", "name": "Claude", "window": "seven_day", "label": "All models", "used": 0.71 },
+      { "id": "codex", "name": "Codex", "window": "codex-secondary", "label": "Weekly window", "used": 0.21 },
+      { "name": "no id is dropped", "window": "x", "label": "x", "used": 0.5 }
+    ] },
+  "notes": [
+    { "date": "2026-11-04", "text": "Big refactor", "at": 1790000000001 },
+    { "date": "2026-11-05", "text": "", "at": 1790000000002 },
+    { "date": "not-a-date", "text": "dropped", "at": 1 },
+    { "date": "2026-11-06", "text": "Line one\nline two\tend", "at": 1790000000003 }
+  ],
+  "report": {
+    "from": "2026-11-03", "to": "2026-11-09", "generatedAt": 1790000000000,
+    "headline": "A busier week than the last", "summary": "Nov 3 – Nov 9 · 6 active days",
+    "coverage": 0.34, "note": "This PC saw 34% of this week, so which day and hour things happened is less certain. Totals are still complete.",
+    "notes": [ { "date": "2026-11-04", "text": "Big refactor" }, { "date": "2026-11-05", "text": "" } ],
+    "providers": [
+      { "id": "claude", "name": "Claude", "window": "five_hour", "label": "Current session", "used": 4.2, "previous": 3.1, "change": 0.3548,
+        "activeDays": 6, "hits": 2, "busiestDay": "2026-11-04", "busiestUsed": 1.3, "streak": 12, "typical": 3.5, "typicalChange": 0.2 },
+      { "id": "codex", "name": "Codex", "window": "codex-primary", "label": "5-hour window", "used": 0.4, "previous": null, "change": null,
+        "activeDays": 2, "hits": 0, "busiestDay": null, "busiestUsed": null, "streak": 0, "typical": null }
+    ],
+    "insights": [
+      { "kind": "change", "provider": "claude", "text": "You used Claude 35% more than the week before." },
+      { "kind": "typical", "provider": "claude", "text": "Your Claude week was 20% above your typical week." },
+      { "kind": "unusual", "provider": "claude", "text": "Wednesday was about twice your normal Wednesday for Claude." },
+      { "kind": "efficiency", "provider": "claude", "text": "Claude Code got about 9.2M tokens out of each session limit this week." },
+      { "kind": "value", "provider": "claude", "text": "This month, Claude Code's tokens would have cost about $412 at API prices; your Max 5× plan is $100 a month." }
+    ]
+  },
+  "tokens": { "updatedAt": 1790000000000, "sources": [
+    { "id": "claude", "label": "Claude Code",
+      "today": { "input": 1, "output": 2, "cacheRead": 3, "cacheWrite": 4, "total": 10, "cost": 0.5 },
+      "week": { "input": 1, "output": 2, "cacheRead": 3, "cacheWrite": 4, "total": 120000000, "cost": 41.9 },
+      "days": [ { "date": "2026-11-09", "total": 10, "cost": 0.5 } ],
+      "projects": [
+        { "name": "UsageNotch-Windows", "total": 60000000, "cost": 20.1, "share": 0.5, "budget": { "tokens": 50000000 } },
+        { "name": "Tiny budget", "total": 1000, "cost": 0.1, "share": 0.1, "budget": { "tokens": 5 } },
+        { "name": "No budget", "total": 1000, "cost": 0.1, "share": 0.1 }
+      ],
+      "models": [ { "name": "claude-opus-5-5", "total": 100, "cost": 1.0, "share": 1.0 } ],
+      "month": { "from": "2026-11-01", "total": 400000000, "cost": 412.3 },
+      "plan": { "name": "Max 5×", "price": 100 },
+      "perLimit": { "tokens": 9200000, "label": "session" },
+      "modelWeeks": [
+        { "week": "2026-10-27", "models": [ { "name": "claude-opus-5-5", "total": 80 }, { "name": "Other", "total": 20 } ] },
+        { "week": "2026-11-03", "models": [ { "name": "claude-opus-5-5", "total": 120 } ] }
+      ] },
+    { "id": "codex", "label": "Codex", "today": null, "week": null, "days": [], "projects": [], "models": [], "allDevices": true,
+      "plan": { "name": "Plus", "price": -5 }, "month": { "from": "bad", "total": 1, "cost": null } }
+  ] },
+  "providers": [
+    { "id": "claude", "name": "Claude", "status": "Ok", "windows": [ { "id": "five_hour", "label": "Current session", "used": 0.2, "at": 1790000000000, "reset": null, "points": [] } ],
+      "plan": "Max 5×",
+      "plans": [ { "at": 1780000000000, "plan": "Max 5×" }, { "at": 1770000000000, "plan": "Pro" }, { "at": 1775000000000 } ],
+      "history": [
+        { "window": "five_hour", "label": "Current session", "days": [], "heat": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+          "observed": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+          "streak": 12,
+          "unusual": [ { "date": "2026-11-04", "ratio": 2.1, "typical": 0.45 }, { "date": "2026-11-05", "ratio": -1, "typical": 0.4 } ] }
+      ] }
+  ]
+}

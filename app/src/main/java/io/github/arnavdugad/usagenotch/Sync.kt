@@ -56,10 +56,15 @@ object SharedSettings {
                 val start = o.getInt("start"); val end = o.getInt("end"); require(start in 0..23 && end in 0..23)
                 Valid(JSONObject().put("on", o.optBoolean("on", false)).put("start", start).put("end", end))
             }
+            key.startsWith(ProjectBudgets.PREFIX) -> (v as? JSONObject)?.takeIf { ProjectBudgets.validKey(key) }?.let { o ->
+                val tokens = o.getLong("tokens"); require(tokens in ProjectBudgets.MIN..ProjectBudgets.MAX)
+                Valid(JSONObject().put("tokens", tokens))
+            }
             else -> null
         }
     }
-    private fun known(key: String) = key == "order" || key == "alerts:thresholds" || key == "alerts:quiet" || listOf("budget:", "accent:", "name:").any { key.startsWith(it) }
+    private fun known(key: String) = key == "order" || key == "alerts:thresholds" || key == "alerts:quiet" || listOf("budget:", "accent:", "name:").any { key.startsWith(it) } ||
+        (key.startsWith(ProjectBudgets.PREFIX) && ProjectBudgets.validKey(key))
 
     fun entries(prefs: SharedPreferences): Map<String, SharedEntry> = runCatching { parseEntries(JSONObject(prefs.getString(ENTRIES, "{}") ?: "{}")) }.getOrDefault(emptyMap())
     fun pending(prefs: SharedPreferences): Set<String> = runCatching { JSONArray(prefs.getString(PENDING, "[]")).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } }.getOrDefault(emptySet())
@@ -161,6 +166,36 @@ object SharedSettings {
         val rank = order.withIndex().associate { it.value to it.index }
         return snapshot.copy(providers = named.withIndex().sortedBy { (i, p) -> rank[p.id]?.toDouble() ?: (order.size + i).toDouble() }.map { it.value })
     }
+}
+
+/**
+ * Weekly token budgets for projects (Windows 2.9), shared with the PC as `projectBudget:<sourceId>|<project>` →
+ * `{"tokens": n}`. Only offered when the PC shares project names; the PC alerts at 80% and 100%.
+ */
+object ProjectBudgets {
+    const val PREFIX = "projectBudget:"
+    const val MIN = 100_000L
+    const val MAX = 1_000_000_000_000L
+    private val source = Regex("[A-Za-z0-9_.:-]{1,100}")
+    fun key(sourceId: String, project: String) = "$PREFIX$sourceId|$project"
+    fun validKey(key: String): Boolean {
+        val rest = key.removePrefix(PREFIX); val bar = rest.indexOf('|')
+        if (bar <= 0 || key.length > 220) return false
+        val project = rest.substring(bar + 1)
+        return source.matches(rest.substring(0, bar)) && project.isNotBlank() && project.length <= 80 && project.none { it.isISOControl() || it == '|' }
+    }
+    /** The budget set on either side; this phone's newer choice wins until the PC answers. */
+    fun of(prefs: SharedPreferences, sourceId: String, project: String, fromPc: Long?): Long? {
+        val entry = SharedSettings.entries(prefs)[key(sourceId, project)] ?: return fromPc
+        return (entry.v as? JSONObject)?.optLong("tokens")?.takeIf { it in MIN..MAX }
+    }
+    /** Sets (or with null, removes) a project's weekly budget here; it reaches the PC with the other settings. */
+    fun set(prefs: SharedPreferences, sourceId: String, project: String, tokens: Long?) {
+        if (!validKey(key(sourceId, project))) return
+        SharedSettings.local(prefs, key(sourceId, project), tokens?.coerceIn(MIN, MAX)?.let { JSONObject().put("tokens", it) })
+    }
+    /** "12.4M of 50M" and the fraction used, for a project's progress bar. */
+    fun progress(used: Long, budget: Long) = (used.toDouble() / budget).coerceAtLeast(0.0)
 }
 
 /** Alert levels and quiet hours, shared with the PC. Defaults come from the design tokens (80% and 95%). */

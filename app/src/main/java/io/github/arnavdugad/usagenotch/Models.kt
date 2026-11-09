@@ -59,16 +59,35 @@ data class AllTime(val since: Long, val used: Double, val activeDays: Int, val r
 /** "This week" for one provider's main limit (feature "report"): the last 7 local days against the 7 before. */
 data class ReportRow(val id: String, val name: String, val window: String, val label: String, val used: Double?, val previous: Double?,
     /** (used - previous) / previous, or null when the PC couldn't compare the weeks fairly. */
-    val change: Double?, val activeDays: Int, val hits: Int, val busiestDay: String?, val busiestUsed: Double?, val streak: Int)
+    val change: Double?, val activeDays: Int, val hits: Int, val busiestDay: String?, val busiestUsed: Double?, val streak: Int,
+    /** Windows 2.9: the median of up to 8 earlier weeks with readings (null with fewer than 3), and this week against it. */
+    val typical: Double? = null, val typicalChange: Double? = null)
 /** A sentence about the week, written on the PC so both apps say the same thing. */
 data class ReportLine(val kind: String, val provider: String?, val text: String)
-data class WeekReport(val from: String, val to: String, val generatedAt: Long, val headline: String, val summary: String, val providers: List<ReportRow>, val insights: List<ReportLine>)
+data class WeekReport(val from: String, val to: String, val generatedAt: Long, val headline: String, val summary: String, val providers: List<ReportRow>, val insights: List<ReportLine>,
+    /** Windows 2.9: how much of the week the PC observed (0..1), a sentence when that was under half, and your notes from this week. */
+    val coverage: Double? = null, val note: String? = null, val notes: List<DayNote> = emptyList())
+/** A note you wrote about a day ("Big refactor"). An empty [text] is a deleted note, kept so the deletion syncs. */
+data class DayNote(val date: String, val text: String, val at: Long = 0)
+/** A day whose usage was at least 1.8× the usual for that weekday ([typical] is that usual, in limits). */
+data class UnusualDay(val date: String, val ratio: Double, val typical: Double)
+/** When UsageNotch first saw a plan; the first entry means "since we started watching". */
+data class PlanChange(val at: Long, val plan: String)
+/** One provider's part of the usage score: the limit it counts and how much of it is used (0..1). */
+data class ScoreRow(val id: String, val name: String, val window: String, val label: String, val used: Double)
+/**
+ * One number for all your providers (feature "score", Windows 2.9): the average of how much of each provider's weekly limit
+ * (or main limit, without one) is used, 0–100. [previous] is the same over each provider's last finished weekly period.
+ */
+data class UsageScore(val value: Int, val previous: Int?, val providers: List<ScoreRow>, val onPhone: Boolean = false)
 data class History(
     val window: String, val label: String, val days: List<Day>, val heat: List<Double>, val observed: List<Int>, val streak: Int, val calendar: List<Day> = emptyList(),
     /** Protocol 2: seven days of readings, oldest first. */
     val trend: List<Reading> = emptyList(), val unused: List<UnusedPeriod> = emptyList(), val hits: List<LimitHit> = emptyList(),
     val reliability: Reliability? = null, val events: List<HistoryEvent> = emptyList(), val sessions: List<WorkSession> = emptyList(),
     val allTime: AllTime? = null,
+    /** Windows 2.9 ("score"): days in the last 30 well above your usual for that weekday. */
+    val unusual: List<UnusualDay> = emptyList(),
 ) {
     fun last(n: Int) = days.takeLast(n)
     /** The last [n] days for the 7, 30 and 90 day ranges: from the calendar (90 days, or more with this phone's saved days), else the 30 days. */
@@ -86,6 +105,8 @@ data class Provider(
     val plan: String? = null,
     /** Where this week's usage went, from Windows 2.7 (Claude). */
     val breakdown: List<Share> = emptyList(),
+    /** Windows 2.9 ("plans"): when UsageNotch first saw each plan, oldest first. */
+    val plans: List<PlanChange> = emptyList(),
 ) {
     /** The window the desktop dock's outer ring shows. */
     fun sessionWindow(): UsageWindow? = windows.firstOrNull { it.id == session } ?: when (providerKind(id)) {
@@ -111,11 +132,23 @@ data class SharedEntry(val v: Any?, val at: Long)
 data class Incident(val provider: String, val title: String, val impact: String, val status: String, val url: String?, val updatedAt: Long?)
 data class TokenTotals(val input: Long, val output: Long, val cacheRead: Long, val cacheWrite: Long, val total: Long, val cost: Double?)
 data class TokenDay(val date: String, val total: Long, val cost: Double?)
-data class TokenShare(val name: String, val total: Long, val cost: Double?, val share: Double)
+data class TokenShare(val name: String, val total: Long, val cost: Double?, val share: Double,
+    /** Windows 2.9: the weekly token budget for this project, compared with [total] (the last 7 days). */
+    val budget: Long? = null)
+/** This calendar month so far, from the 1st ([from]). */
+data class TokenMonth(val from: String, val total: Long, val cost: Double?)
+/** The plan's US list price a month ("Max 5×", 100). */
+data class PlanPrice(val name: String, val price: Double)
+/** Tokens this week for each full main limit used ([label] is the limit's name, such as "session"). */
+data class PerLimit(val tokens: Long, val label: String)
+/** One week of tokens by model, starting on [week]. */
+data class ModelWeek(val week: String, val models: List<Pair<String, Long>>)
 /** Tokens a coding tool recorded on the PC (Claude Code, Codex), with an API-price equivalent cost. */
 data class TokenSource(val id: String, val label: String, val today: TokenTotals?, val week: TokenTotals?, val days: List<TokenDay>, val projects: List<TokenShare>, val models: List<TokenShare>,
     /** Totals from the provider for the whole account, across every device (Codex), rather than this PC's transcripts. Costs are null then. */
-    val allDevices: Boolean = false, val lifetime: Long? = null, val peakDaily: Long? = null, val longestStreak: Int? = null)
+    val allDevices: Boolean = false, val lifetime: Long? = null, val peakDaily: Long? = null, val longestStreak: Int? = null,
+    /** Windows 2.9 ("tokens2"): this month so far, the plan's price, tokens per limit used and 8 weeks of models. */
+    val month: TokenMonth? = null, val plan: PlanPrice? = null, val perLimit: PerLimit? = null, val modelWeeks: List<ModelWeek> = emptyList())
 data class TokenUsage(val updatedAt: Long, val sources: List<TokenSource>)
 
 data class Snapshot(
@@ -125,13 +158,15 @@ data class Snapshot(
     val shared: Map<String, SharedEntry> = emptyMap(), val incidents: List<Incident> = emptyList(), val tokens: TokenUsage? = null,
     /** "This week", from Windows 2.8 (feature "report"). */
     val report: WeekReport? = null,
+    /** Windows 2.9: the combined usage score ("score") and your day notes ("notes"), including deleted ones. */
+    val score: UsageScore? = null, val notes: List<DayNote> = emptyList(),
 ) {
     /** Time of the most recent reading the PC observed, used to never replace newer data with older data. */
     fun newestReading() = providers.flatMap { it.windows }.maxOfOrNull { it.at } ?: 0L
     fun has(feature: String) = feature in features
     companion object {
         /** What this app understands, sent to the PC so it can include the heavier protocol 2 fields. */
-        const val FEATURES = "refresh,settings,trend,insights,tokens,incidents,accounts,report,alltime"
+        const val FEATURES = "refresh,settings,trend,insights,tokens,incidents,accounts,report,alltime,score,notes,plans,tokens2"
         private fun <T> JSONObject.list(key: String, max: Int, item: (JSONObject) -> T?): List<T> {
             val a = optJSONArray(key) ?: return emptyList()
             require(a.length() <= max) { "Too many $key" }
@@ -143,11 +178,16 @@ data class Snapshot(
         private fun totals(j: JSONObject?): TokenTotals? = j?.let { TokenTotals(it.count("input"), it.count("output"), it.count("cacheRead"), it.count("cacheWrite"), it.count("total"), it.number("cost")?.takeIf { c -> c >= 0 && c < 1e9 }) }
         private fun parseTokens(root: JSONObject): TokenUsage? = root.optJSONObject("tokens")?.let { t -> runCatching {
             TokenUsage(t.optLong("updatedAt", 0), t.list("sources", 8) { s ->
-                fun shares(key: String, max: Int) = s.list(key, max) { TokenShare(it.getString("name").filterNot { c -> c.isISOControl() }.take(80), it.count("total"), it.number("cost"), (it.number("share") ?: 0.0).coerceIn(0.0, 1.0)) }
+                fun shares(key: String, max: Int) = s.list(key, max) { TokenShare(it.getString("name").filterNot { c -> c.isISOControl() }.take(80), it.count("total"), it.number("cost"), (it.number("share") ?: 0.0).coerceIn(0.0, 1.0),
+                    it.optJSONObject("budget")?.let { b -> b.count("tokens").takeIf { n -> n in 100_000..1_000_000_000_000L } }) }
                 TokenSource(s.getString("id").take(80), s.getString("label").take(60), totals(s.optJSONObject("today")), totals(s.optJSONObject("week")),
                     s.list("days", 60) { TokenDay(it.getString("date").take(10), it.count("total"), it.number("cost")) }, shares("projects", 8), shares("models", 6),
                     s.optBoolean("allDevices", false), s.time("lifetime")?.coerceIn(0, 1_000_000_000_000_000L), s.time("peakDaily")?.coerceIn(0, 1_000_000_000_000_000L),
-                    if (s.has("longestStreak") && !s.isNull("longestStreak")) s.getInt("longestStreak").coerceIn(0, 100_000) else null)
+                    if (s.has("longestStreak") && !s.isNull("longestStreak")) s.getInt("longestStreak").coerceIn(0, 100_000) else null,
+                    s.optJSONObject("month")?.let { m -> runCatching { TokenMonth(m.date("from")!!, m.count("total"), m.number("cost")?.takeIf { c -> c >= 0 && c < 1e9 }) }.getOrNull() },
+                    s.optJSONObject("plan")?.let { p -> runCatching { PlanPrice(p.clean("name", 30)!!, p.getDouble("price").also { v -> require(v > 0 && v < 100_000) }) }.getOrNull() },
+                    s.optJSONObject("perLimit")?.let { p -> runCatching { PerLimit(p.count("tokens").also { n -> require(n > 0) }, p.clean("label", 40) ?: "main") }.getOrNull() },
+                    runCatching { s.list("modelWeeks", 16) { w -> ModelWeek(w.date("week")!!, w.list("models", 8) { m -> m.getString("name").filterNot { c -> c.isISOControl() }.take(60) to m.count("total") }) } }.getOrDefault(emptyList()))
             })
         }.getOrNull() }
         private fun JSONObject.clean(key: String, max: Int): String? = text(key, max * 2)?.filterNot { it.isISOControl() }?.trim()?.take(max)?.ifBlank { null }
@@ -159,10 +199,18 @@ data class Snapshot(
                 r.list("providers", 16) { p ->
                     ReportRow(p.getString("id").take(80), p.clean("name", 60) ?: p.getString("id").take(60), p.text("window", 100) ?: "", p.clean("label", 80) ?: "",
                         p.limits("used"), p.limits("previous"), p.number("change")?.takeIf { it >= -1 && it <= 100_000 },
-                        p.optInt("activeDays").coerceIn(0, 7), p.optInt("hits").coerceIn(0, 1_000), p.date("busiestDay"), p.limits("busiestUsed"), p.optInt("streak").coerceIn(0, 100_000))
+                        p.optInt("activeDays").coerceIn(0, 7), p.optInt("hits").coerceIn(0, 1_000), p.date("busiestDay"), p.limits("busiestUsed"), p.optInt("streak").coerceIn(0, 100_000),
+                        p.limits("typical"), p.number("typicalChange")?.takeIf { it >= -1 && it <= 100_000 })
                 },
-                r.list("insights", 16) { i -> i.clean("text", 240)?.let { ReportLine(i.text("kind", 20) ?: "", i.text("provider", 80), it) } }.take(7))
+                r.list("insights", 16) { i -> i.clean("text", 240)?.let { ReportLine(i.text("kind", 20) ?: "", i.text("provider", 80), it) } }.take(8),
+                r.number("coverage")?.takeIf { it >= 0 }?.coerceAtMost(1.0), r.clean("note", 240),
+                runCatching { r.list("notes", 31) { n -> n.date("date")?.let { d -> DayNotes.clean(n.optString("text")).takeIf { it.isNotEmpty() }?.let { DayNote(d, it) } } } }.getOrDefault(emptyList()))
         }.getOrNull() }
+        private fun parseScore(root: JSONObject): UsageScore? = root.optJSONObject("score")?.let { s -> runCatching {
+            UsageScore(s.getInt("value").also { require(it in 0..100) }, if (s.has("previous") && !s.isNull("previous")) s.getInt("previous").coerceIn(0, 100) else null,
+                s.list("providers", 16) { p -> ScoreRow(p.getString("id").take(80), p.clean("name", 60) ?: p.getString("id").take(60), p.text("window", 100) ?: "", p.clean("label", 80) ?: "", p.fraction("used").coerceAtMost(1.0)) })
+        }.getOrNull() }
+        private fun parseNotes(root: JSONObject): List<DayNote> = runCatching { root.list("notes", 500) { n -> DayNote(n.date("date")!!, DayNotes.clean(n.optString("text")), n.long("at")) } }.getOrDefault(emptyList())
         private fun parseAllTime(h: JSONObject): AllTime? = h.optJSONObject("allTime")?.let { a -> runCatching {
             AllTime(a.long("since"), (a.limits("used") ?: 0.0), a.optInt("activeDays").coerceIn(0, 1_000_000), a.optInt("recordedDays").coerceIn(0, 1_000_000),
                 a.optInt("hits").coerceIn(0, 1_000_000), a.date("bestDay"), a.limits("bestUsed") ?: 0.0)
@@ -196,7 +244,8 @@ data class Snapshot(
                     (0 until 168).map { heat.getDouble(it).takeIf { v -> v.isFinite() && v >= 0 } ?: 0.0 }, (0 until 168).map { observed.getInt(it).coerceAtLeast(0) }, h.optInt("streak", 0).coerceIn(0, 10_000),
                     calendar?.let { daysOf(it) } ?: emptyList(),
                     extra?.trend.orEmpty(), extra?.unused.orEmpty(), extra?.hits.orEmpty(), extra?.reliability, extra?.events.orEmpty(), extra?.sessions.orEmpty(),
-                    parseAllTime(h))
+                    parseAllTime(h),
+                    runCatching { h.list("unusual", 31) { u -> UnusualDay(u.date("date")!!, u.getDouble("ratio").also { require(it.isFinite() && it > 0 && it < 1000) }, (u.limits("typical") ?: 0.0)) } }.getOrDefault(emptyList()))
             }.getOrNull() }
         }
         /** Internet sync details handed over the pinned local link: the new relay, "off", or null when the PC doesn't say. */
@@ -244,11 +293,12 @@ data class Snapshot(
                     parsedExtras,
                     parseHistory(p), p.text("kind", 40)?.let { providerKind(it) } ?: providerKind(id), accountLabel,
                     p.text("plan", 30)?.filterNot { it.isISOControl() },
-                    runCatching { p.list("breakdown", 16) { b -> Share(b.getString("name").filterNot { it.isISOControl() }.take(40), (b.number("percent") ?: 0.0).coerceIn(0.0, 100.0)) }.filter { it.percent > 0 }.take(8) }.getOrDefault(emptyList()))
+                    runCatching { p.list("breakdown", 16) { b -> Share(b.getString("name").filterNot { it.isISOControl() }.take(40), (b.number("percent") ?: 0.0).coerceIn(0.0, 100.0)) }.filter { it.percent > 0 }.take(8) }.getOrDefault(emptyList()),
+                    runCatching { p.list("plans", 20) { c -> PlanChange(c.long("at"), c.clean("plan", 30)!!) }.sortedBy { it.at } }.getOrDefault(emptyList()))
             }, root.optString("source").take(40).ifBlank { null }, root.optString("appVersion").take(20).ifBlank { null },
                 root.optInt("protocol", 1).coerceIn(1, 100),
                 root.optJSONArray("features")?.let { f -> require(f.length() <= 64); (0 until f.length()).map { f.getString(it).take(40) }.toSet() } ?: emptySet(),
-                parseShared(root), parseIncidents(root), parseTokens(root), parseReport(root))
+                parseShared(root), parseIncidents(root), parseTokens(root), parseReport(root), parseScore(root), parseNotes(root))
         }
     }
 }

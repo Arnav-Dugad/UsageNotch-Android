@@ -60,10 +60,14 @@ private fun Modifier.stagger(progress: Float, index: Int, count: Int): Modifier 
  * "This week", written by your PC: a headline, each provider's main limit against the week before, and a few plain
  * sentences. Every number matches History, because both come from the same daily totals.
  */
-@Composable fun ThisWeekCard(report: WeekReport, providers: List<Provider>, reduced: Boolean) {
+@Composable fun ThisWeekCard(report: WeekReport, providers: List<Provider>, reduced: Boolean, notes: Map<String, String> = emptyMap()) {
     val t = LocalTokens.current; val accentOf = LocalAccent.current
-    val grow = rise("week-${report.from}-${report.generatedAt}", reduced, 900)
+    val key = "week-${report.from}-${report.generatedAt}"
+    val grow = rise(key, reduced, 900)
     val parts = report.providers.size + report.insights.size + 1
+    // Notes saved on this phone (the PC's included once synced) win over the copy in the report.
+    val weekNotes = (report.notes.associate { it.date to it.text } + notes.filterKeys { it >= report.from && it <= report.to })
+        .filterValues { it.isNotBlank() }.toSortedMap()
     Panel(Modifier.fillMaxWidth(), tint = t.accent.copy(alpha = .22f)) { Column(Modifier.padding(18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.AutoAwesome, null, tint = t.accent, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(8.dp))
@@ -71,10 +75,18 @@ private fun Modifier.stagger(progress: Float, index: Int, count: Int): Modifier 
             Text(report.summary, fontSize = 12.sp, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(report.headline, fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Normal, color = t.text, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp).stagger(grow, 0, parts))
-        report.providers.forEachIndexed { i, row ->
-            val known = providers.firstOrNull { it.id == row.id }
-            ReportProviderRow(row, known?.id ?: row.id, accentOf(row.id), Modifier.stagger(grow, i + 1, parts))
+        // How sure the PC is: shown when it saw less than half of the week.
+        report.note?.let { note ->
+            Row(Modifier.padding(bottom = 6.dp).stagger(grow, 0, parts), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Outlined.Info, null, tint = t.faint, modifier = Modifier.padding(top = 1.dp).size(14.dp)); Spacer(Modifier.width(6.dp))
+                Text(note, fontSize = 12.sp, lineHeight = 16.sp, color = t.muted)
+            }
         }
+        report.providers.forEachIndexed { i, row ->
+            ReportProviderRow(row, accentOf(row.id), reduced, i, key, Modifier.stagger(grow, i + 1, parts))
+        }
+        if (report.providers.any { it.typical != null || it.previous != null })
+            Text("Rings: this week against your typical week (or the week before). A second lap means more than usual.", fontSize = 11.sp, lineHeight = 15.sp, color = t.faint, modifier = Modifier.padding(top = 2.dp))
         if (report.insights.isNotEmpty()) {
             HorizontalDivider(Modifier.padding(top = 10.dp, bottom = 6.dp), color = t.hairline)
             report.insights.forEachIndexed { i, line ->
@@ -85,18 +97,33 @@ private fun Modifier.stagger(progress: Float, index: Int, count: Int): Modifier 
                 }
             }
         }
+        if (weekNotes.isNotEmpty()) {
+            HorizontalDivider(Modifier.padding(top = 8.dp, bottom = 6.dp), color = t.hairline)
+            Row(verticalAlignment = Alignment.Top, modifier = Modifier.semantics(mergeDescendants = true) {}) {
+                Icon(Icons.Outlined.EditNote, null, tint = t.accent, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Column {
+                    Text("Your notes", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = t.muted)
+                    weekNotes.forEach { (date, text) ->
+                        val day = runCatching { LocalDate.parse(date).dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH) }.getOrDefault(date)
+                        Text(buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("$day  ") }; append(text) }, fontSize = 13.sp, lineHeight = 18.sp, color = t.text, modifier = Modifier.padding(top = 3.dp))
+                    }
+                }
+            }
+        }
     } }
 }
 
-@Composable private fun ReportProviderRow(row: ReportRow, logoId: String, accent: Color, modifier: Modifier) {
+@Composable private fun ReportProviderRow(row: ReportRow, accent: Color, reduced: Boolean, index: Int, key: Any, modifier: Modifier) {
     val t = LocalTokens.current
     val change = changeText(row.change)
+    // Totals count up as the card opens, one provider after another.
+    val shownUsed = row.used?.let { countUp(it, "$key-${row.id}-used", reduced, 200 + index * 160) }
     Row(modifier.fillMaxWidth().padding(vertical = 8.dp).semantics(mergeDescendants = true) {
         contentDescription = "${row.name}: ${LimitText.of(row.used)} this week" + (row.previous?.let { ", ${LimitText.of(it)} the week before" } ?: "") + (change?.let { ", $it" } ?: "") +
-            (if (row.hits > 0) ", limit reached ${row.hits} times" else "")
+            (if (row.hits > 0) ", limit reached ${row.hits} times" else "") + (row.typical?.let { ", typical week ${LimitText.of(it)}" } ?: "")
     }, verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(34.dp).clip(com.kyant.shapes.RoundedRectangle(11.dp)).background(innerSurface()), contentAlignment = Alignment.Center) { Logo(logoId, Modifier.size(19.dp)) }
-        Spacer(Modifier.width(12.dp))
+        TypicalRing(row, accent, reduced, index, key)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(row.name, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (row.label.isNotBlank()) Text(row.label, fontSize = 12.sp, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -105,9 +132,13 @@ private fun Modifier.stagger(progress: Float, index: Int, count: Int): Modifier 
                 append("${row.activeDays} active day${if (row.activeDays == 1) "" else "s"}")
                 if (row.hits > 0) { append(" · "); withStyle(SpanStyle(color = warn)) { append("limit reached ${if (row.hits == 1) "once" else if (row.hits == 2) "twice" else "${row.hits} times"}") } }
             }, fontSize = 12.sp, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            row.typical?.let { typical ->
+                Text("Typical week: " + LimitText.of(typical) + (row.typicalChange?.let { c -> " · " + when { abs(c) < .1 -> "about usual"; c > 0 -> "${(c * 100).roundToInt()}% above"; else -> "${(-c * 100).roundToInt()}% below" } } ?: ""),
+                    fontSize = 12.sp, color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Column(Modifier.padding(start = 10.dp), horizontalAlignment = Alignment.End) {
-            Text(LimitText.of(row.used), fontSize = 20.sp, fontWeight = FontWeight.Light, color = t.text)
+            Text(LimitText.of(shownUsed), fontSize = 20.sp, fontWeight = FontWeight.Light, color = t.text)
             val tone = if (change != null && change != "steady") Color(Palette.readable(accent.toArgb(), if (t.dark) 0xFF151922.toInt() else 0xFFFFFFFF.toInt())) else t.muted
             // Stacked, so the left column keeps room for the limit name, active days and limits reached.
             when {
@@ -159,15 +190,17 @@ private fun Modifier.stagger(progress: Float, index: Int, count: Int): Modifier 
 /** "What's new" after an update: shown once per version that has notes, never on a fresh install. */
 object WhatsNew {
     /** The versionCode whose notes [items] describes. */
-    const val VERSION = 11
-    const val TITLE = "What's new in 1.8"
+    const val VERSION = 12
+    const val TITLE = "What's new in 1.9"
     data class Item(val icon: ImageVector, val title: String, val text: String)
     val items = listOf(
-        Item(Icons.Outlined.AutoAwesome, "This week", "A plain-English summary at the top of History: how your week compares, limits you reached and your busiest day."),
-        Item(Icons.Outlined.DateRange, "7, 30 or 90 days, and all time", "Pick a range, and see everything ever recorded: your total, active days and best day."),
-        Item(Icons.Outlined.Storage, "History kept on this phone", "Daily totals stay here until you delete them, even while your PC is off. Export them as CSV in Settings."),
-        Item(Icons.AutoMirrored.Outlined.TrendingUp, "Pace ranges", "\"Limit around 4:10 PM (likely 3:40–4:50 PM)\"."),
-        Item(Icons.Outlined.Verified, "Official logos", "The latest Gemini and Codex marks, in their real colours."),
+        Item(Icons.Outlined.DonutLarge, "Usage score", "One number for all your providers on Overview, and how it moved since last week."),
+        Item(Icons.Outlined.EditNote, "Notes on days", "Tap a day in History to write a note like \"Big refactor\". Notes sync with your PC and show in This week."),
+        Item(Icons.Outlined.AutoAwesome, "Your typical week", "This week now compares with your usual week too, points out unusual days, and says when your PC saw too little to be sure."),
+        Item(Icons.Outlined.Payments, "What your tokens are worth", "This month at API prices against your plan's price, tokens per limit, and your model mix over 8 weeks."),
+        Item(Icons.Outlined.Savings, "Project budgets", "Give a project a weekly token budget; your PC alerts you at 80% and 100%."),
+        Item(Icons.Outlined.WorkspacePremium, "Plan history", "See when your plan changed, such as Pro to Max, in each provider's view."),
+        Item(Icons.Outlined.Animation, "Smoother motion", "Charts morph between 7, 30 and 90 days, and tabs glide like the Windows tab bar."),
     )
     private const val KEY = "whatsNewSeen"
     /** Show after an update to a version with notes; a fresh install starts with them marked as read. */
@@ -216,7 +249,7 @@ object WhatsNew {
                             }
                         }
                     }
-                    Text("This week and all-time totals come from UsageNotch for Windows 2.8 or later.", fontSize = 12.sp, lineHeight = 16.sp, color = t.faint, modifier = Modifier.padding(top = 8.dp))
+                    Text("The score's weekly comparison, typical weeks, unusual days, plan history and token values come from UsageNotch for Windows 2.9 or later.", fontSize = 12.sp, lineHeight = 16.sp, color = t.faint, modifier = Modifier.padding(top = 8.dp))
                 }
                 GlassButton(onClose, Modifier.fillMaxWidth().padding(22.dp), prominent = true) { Text("Continue", fontWeight = FontWeight.SemiBold) }
               }

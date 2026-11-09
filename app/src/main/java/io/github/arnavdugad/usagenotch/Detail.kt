@@ -98,6 +98,7 @@ import kotlin.math.roundToInt
             } }
         }
         if (p.breakdown.isNotEmpty()) cards += { BreakdownCard(p, reduced) }
+        if (p.plans.isNotEmpty()) cards += { PlanHistoryCard(p) }
         cards += { AccentCard(p, onAccent, customName, onName.takeIf { !preview }) }
         cards.forEachIndexed { index, card ->
             // Cards rise in one after another as the view opens.

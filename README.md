@@ -6,7 +6,7 @@ Your Claude, Codex, Gemini and Cursor usage limits on your phone, in liquid glas
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.8.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.9.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
 | **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar, 2.6 for settings sync, Stats and tokens), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
@@ -52,6 +52,11 @@ Widgets are glass too: a translucent body that lets your wallpaper through, with
 
 - **Your plan and every kind of account** (Windows 2.7): a quiet badge shows the plan each provider reports ("Max 5×", "Plus", "Pro", "Edu", "Business"…). Edu, Business and Enterprise seats that report a monthly credit allowance show it as a limit ("30 of 150 credits"), with budgets and alerts like any other. Claude's dollar credit grants read as "$249.99 of $250". Bought credits and free limit resets appear as plain information rows, and a "Where this week went" card shows how Claude splits your week (Claude Code, chat…).
 - **This week** (Windows 2.8): History opens with a plain-English summary your PC writes: how the week compares with the one before, limits you reached, your busiest day and when you usually work.
+- **Usage score** (Android 1.9): one number for all your providers on Overview, the average of how much of each provider's weekly limit you've used, with how it moved since last week (Windows 2.9).
+- **Your typical week** (Windows 2.9): This week also compares with your usual week, with a ring around each provider that fills to your typical week and laps past it. Unusually busy days get a mark ("2× your normal Saturday"), and the PC says when it saw too little of the week to be sure.
+- **Notes on days**: tap a day in History to write a note ("Big refactor"). Notes show on the chart and calendar and in This week, are kept on the phone, and sync with your PC (Windows 2.9).
+- **What your tokens are worth** (Windows 2.9): this month at API prices against your plan's price, tokens for each full limit used, your model mix over 8 weeks, and weekly token budgets for projects (tap a project to set one; your PC alerts at 80% and 100%).
+- **Plan history** (Windows 2.9): each provider's view shows when your plan changed, such as Pro to Max.
 - **History kept on your phone**: every sync saves your daily totals on the phone until you delete them, so History covers 7, 30 or 90 days plus all time, and still works while the PC is off. Export them as CSV or delete them in Settings → Data.
 - **Pace ranges**: "limit around 4:10 PM (likely 3:40–4:50 PM)", from the fastest and slowest paces your PC has seen.
 - **Stats you can read at a glance** (Windows 2.7): one full limit is 100% and more than that is a multiple, so "5.6×" means five and a half limits' worth. History says how much of each day your PC actually observed. Usage while the PC was off or asleep, and usage right after a renewal, is now counted, so daily totals are complete.

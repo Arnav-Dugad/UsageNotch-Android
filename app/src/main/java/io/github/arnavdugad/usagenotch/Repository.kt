@@ -91,6 +91,7 @@ class Repository(val context: Context) {
         SharedSettings.merge(prefs, parsed.shared)
         if (parsed.has("settings")) SharedSettings.seed(prefs)
         if (source == "lan" && parsed.has("settings")) runCatching { pushSettings(adopted) }
+        if (source == "lan" && parsed.has("notes")) runCatching { pushNotes(adopted) }
     } }
     suspend fun disconnect() = withContext(Dispatchers.IO) { lock.withLock { vault.clear(); cache.edit().clear().commit() } }
     /**
@@ -111,6 +112,7 @@ class Repository(val context: Context) {
             val accepted = accept(result.body, Source.Lan, now)
             SharedSettings.merge(prefs, parsed.shared)
             if (parsed.has("settings")) { SharedSettings.seed(prefs); runCatching { pushSettings(pairing() ?: pair) } }
+            if (parsed.has("notes")) runCatching { pushNotes(pairing() ?: pair) }
             return@withLock accepted
         } catch (_: CertificateException) { "PC identity changed. Export a new pairing file from UsageNotch Link." }
         catch (e: javax.net.ssl.SSLException) {
@@ -152,6 +154,20 @@ class Repository(val context: Context) {
         val response = putSettings(pair, body)
         SharedSettings.merge(prefs, SharedSettings.parseEntries(JSONObject(response).getJSONObject("shared")))
     }
+    /** Sends notes written on this phone to the PC, then takes its merged copy. Local link only. */
+    private fun pushNotes(pair: Pairing) {
+        val body = LocalHistory.open(context) { DayNotes.payload(it.pendingNotes()) } ?: return
+        val response = putNotes(pair, body)
+        LocalHistory.open(context) { it.mergeNotes(DayNotes.parseResponse(response)) }
+    }
+    /** Notes written on this phone that wait for the PC's Wi-Fi. */
+    fun pendingNotes(): Int = runCatching { LocalHistory.open(context) { it.pendingNotes().size } }.getOrDefault(0)
+    /** Sends a note right after you write it, when the PC is on this network and keeps notes. Quietly waits otherwise. */
+    suspend fun syncNotes(): Boolean = withContext(Dispatchers.IO) { lock.withLock {
+        val pair = pairing() ?: return@withLock false
+        if (rawSnapshot()?.has("notes") != true) return@withLock false
+        runCatching { pushNotes(pair) }.isSuccess
+    } }
     /** Sends pending settings right after you change one, when the PC is on this network. Quietly waits otherwise. */
     suspend fun syncSettings(): Boolean = withContext(Dispatchers.IO) { lock.withLock {
         val pair = pairing() ?: return@withLock false
@@ -163,8 +179,10 @@ class Repository(val context: Context) {
         runCatching { keepHistory(Snapshot.parse(raw), now) }
         return true
     }
-    /** Adds the snapshot's daily totals to this phone's permanent history. A storage problem never fails a sync. */
-    private fun keepHistory(snapshot: Snapshot, now: Long) { runCatching { LocalHistory.open(context) { it.save(snapshot, now) } } }
+    /** Adds the snapshot's daily totals (and the PC's notes) to this phone's permanent history. A storage problem never fails a sync. */
+    private fun keepHistory(snapshot: Snapshot, now: Long) {
+        runCatching { LocalHistory.open(context) { it.save(snapshot, now); if (snapshot.has("notes")) it.mergeNotes(snapshot.notes) } }
+    }
     private fun fail(message: String, now: Long): Boolean { cache.edit().putString("error", message).putLong("checked", now).putBoolean("offline", false).apply(); return false }
     companion object { private val lock = Mutex() }
 }
@@ -186,6 +204,8 @@ internal fun fetchResult(pair: Pairing, refresh: Boolean): LinkResult =
     else try { linkRequest(pair, "/v1/refresh", "POST", null, 32_000) } catch (_: MissingRoute) { linkRequest(pair, "/v1/snapshot", "GET", null, 10_000) }
 /** PUT /v1/settings with this phone's pending settings; returns the PC's merged map. */
 internal fun putSettings(pair: Pairing, body: String): String = linkRequest(pair, "/v1/settings", "PUT", body, 10_000).body
+/** PUT /v1/notes with this phone's pending notes (Windows 2.9); returns every note the PC has. */
+internal fun putNotes(pair: Pairing, body: String): String = linkRequest(pair, "/v1/notes", "PUT", body, 10_000).body
 private class MissingRoute : IOException("Route not offered by this PC")
 private fun linkRequest(pair: Pairing, path: String, method: String, body: String?, readTimeout: Int): LinkResult {
     val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(pinnedTrustManager(pair.certificateSha256)), SecureRandom()) }
@@ -204,7 +224,7 @@ private fun linkRequest(pair: Pairing, path: String, method: String, body: Strin
         connection.setRequestProperty("X-UsageNotch-Protocol", "2")
         connection.setRequestProperty("X-UsageNotch-Features", Snapshot.FEATURES)
         if (method != "GET") {
-            val bytes = (body ?: "").toByteArray(Charsets.UTF_8); require(bytes.size <= 32_768) { "Settings too large" }
+            val bytes = (body ?: "").toByteArray(Charsets.UTF_8); require(bytes.size <= if (path == "/v1/notes") DayNotes.MAX_BODY else 32_768) { "Request too large" }
             connection.doOutput = true; connection.setFixedLengthStreamingMode(bytes.size)
             if (body != null) connection.setRequestProperty("Content-Type", "application/json")
             connection.outputStream.use { it.write(bytes) }

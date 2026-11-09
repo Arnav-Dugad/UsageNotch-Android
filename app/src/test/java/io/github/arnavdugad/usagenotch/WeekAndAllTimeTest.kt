@@ -38,7 +38,7 @@ class WeekAndAllTimeTest {
         assertEquals("Current session", claude.label); assertEquals("five_hour", claude.window)
         val codex = r.providers[1]
         assertNull(codex.previous); assertNull(codex.change); assertNull(codex.busiestDay); assertNull(codex.busiestUsed); assertEquals(0, codex.hits)
-        assertEquals("at most 7 sentences; blank ones are dropped", 7, r.insights.size)
+        assertEquals("at most 8 sentences (Windows 2.9); blank ones are dropped", 8, r.insights.size)
         assertEquals("You used Claude 35% more than the week before.", r.insights[0].text); assertEquals("change", r.insights[0].kind); assertEquals("claude", r.insights[0].provider)
         assertNull("a JSON null provider is not the text \"null\"", r.insights[1].provider)
         assertEquals("Claude Code used 48.2M tokens this week (about $41.90 at API prices).", r.insights[6].text)
@@ -180,10 +180,10 @@ class WeekAndAllTimeTest {
     }
 
     @Test fun whatsNewShowsOnceAfterAnUpdate() {
-        assertTrue(WhatsNew.shouldShow(seen = 0, current = 11, freshInstall = false))
-        assertFalse("fresh installs skip it", WhatsNew.shouldShow(seen = 0, current = 11, freshInstall = true))
-        assertFalse("already read", WhatsNew.shouldShow(seen = 11, current = 11, freshInstall = false))
-        assertTrue(WhatsNew.items.size in 3..6)
-        assertEquals(11, BuildConfig.VERSION_CODE); assertEquals("1.8.0", BuildConfig.VERSION_NAME)
+        assertTrue(WhatsNew.shouldShow(seen = 11, current = 12, freshInstall = false))
+        assertFalse("fresh installs skip it", WhatsNew.shouldShow(seen = 0, current = 12, freshInstall = true))
+        assertFalse("already read", WhatsNew.shouldShow(seen = 12, current = 12, freshInstall = false))
+        assertTrue(WhatsNew.items.size in 3..7)
+        assertEquals(12, BuildConfig.VERSION_CODE); assertEquals("1.9.0", BuildConfig.VERSION_NAME)
     }
 }
