@@ -116,11 +116,12 @@ fun dynamicTokens(scheme: androidx.compose.material3.ColorScheme, dark: Boolean)
     CompositionLocalProvider(LocalTokens provides t, LocalStyle provides style) { MaterialTheme(colorScheme = scheme, shapes = shapes, content = content) }
 }
 
-/** Brand marks: Claude and Gemini keep their own colours; OpenAI and Cursor use the theme's ink, as on the desktop. */
+/** Brand marks from Lobe Icons and Simple Icons: Claude and Gemini keep their own colours; Codex, OpenAI and Cursor use the theme's ink, as on the desktop. */
 object Logos {
     fun resource(id: String) = when (providerKind(id)) {
         "claude", "anthropic-api" -> R.drawable.logo_claude
-        "codex", "openai-api" -> R.drawable.logo_codex
+        "codex" -> R.drawable.logo_codex
+        "openai-api" -> R.drawable.logo_openai
         "gemini" -> R.drawable.logo_gemini
         "cursor" -> R.drawable.logo_cursor
         else -> R.drawable.ic_notch

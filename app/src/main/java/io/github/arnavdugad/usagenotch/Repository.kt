@@ -86,6 +86,7 @@ class Repository(val context: Context) {
         vault.save(adopted)
         val now = System.currentTimeMillis()
         check(cache.edit().clear().putString("snapshot", response).putLong("sync", now).putLong("checked", now).putString("source", source).commit())
+        keepHistory(parsed, now)
         // Pairing with a PC that syncs settings: bring this phone's earlier budgets and colours along, then take the PC's.
         SharedSettings.merge(prefs, parsed.shared)
         if (parsed.has("settings")) SharedSettings.seed(prefs)
@@ -159,8 +160,11 @@ class Repository(val context: Context) {
     } }
     private fun accept(raw: String, source: Source, now: Long): Boolean {
         check(cache.edit().putString("snapshot", raw).putLong("sync", now).putLong("checked", now).putString("source", if (source == Source.Internet) "internet" else "lan").putBoolean("offline", false).putString("error", "").commit())
+        runCatching { keepHistory(Snapshot.parse(raw), now) }
         return true
     }
+    /** Adds the snapshot's daily totals to this phone's permanent history. A storage problem never fails a sync. */
+    private fun keepHistory(snapshot: Snapshot, now: Long) { runCatching { LocalHistory.open(context) { it.save(snapshot, now) } } }
     private fun fail(message: String, now: Long): Boolean { cache.edit().putString("error", message).putLong("checked", now).putBoolean("offline", false).apply(); return false }
     companion object { private val lock = Mutex() }
 }

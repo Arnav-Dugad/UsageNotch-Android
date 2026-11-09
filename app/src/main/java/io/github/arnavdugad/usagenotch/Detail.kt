@@ -132,6 +132,7 @@ import kotlin.math.roundToInt
         Text(headline, fontSize = 20.sp, fontWeight = FontWeight.Light, color = t.text, modifier = Modifier.padding(top = 8.dp))
         val parts = buildList {
             f.rate?.let { add("${if (it >= 0) "+" else ""}${"%.1f".format(java.util.Locale.ENGLISH, it)}% an hour") }
+            PaceRange.of(f, w.used, w.reset, now, clock24)?.let { add(it) }
             if (f.limitAt != null && f.limitAt > now && w.reset != null) add("resets at ${ClockText.time(w.reset, clock24)}")
         }
         if (parts.isNotEmpty()) Text(parts.joinToString(" · "), fontSize = 12.sp, color = t.muted, modifier = Modifier.padding(top = 3.dp))

@@ -1,0 +1,40 @@
+{
+  "schema": 1, "protocol": 2, "generatedAt": 1790000000000, "source": "windows-app", "appVersion": "2.8.0",
+  "features": ["refresh", "settings", "trend", "insights", "tokens", "incidents", "accounts", "report", "alltime"],
+  "report": {
+    "from": "2026-11-03", "to": "2026-11-09", "generatedAt": 1790000000000,
+    "headline": "A busier week than the last",
+    "summary": "Nov 3 – Nov 9 · 6 active days",
+    "providers": [
+      { "id": "claude", "name": "Claude", "window": "five_hour", "label": "Current session", "used": 4.2, "previous": 3.1, "change": 0.3548,
+        "activeDays": 6, "hits": 2, "busiestDay": "2026-11-04", "busiestUsed": 1.3, "streak": 12 },
+      { "id": "codex", "name": "Codex", "window": "codex-primary", "label": "5-hour limit", "used": 0.4, "previous": null, "change": null,
+        "activeDays": 3, "hits": 0, "busiestDay": null, "busiestUsed": null, "streak": 0 },
+      { "name": "No id, so it is dropped" }
+    ],
+    "insights": [
+      { "kind": "change", "provider": "claude", "text": "You used Claude 35% more than the week before." },
+      { "kind": "hits", "provider": null, "text": "You reached the Claude session limit twice this week." },
+      { "kind": "busiest", "provider": "claude", "text": "Wednesday was your busiest day, with 1.3 full Claude session limits." },
+      { "kind": "hours", "provider": "claude", "text": "You're usually busiest on Tuesdays around 2 PM." },
+      { "kind": "unused", "provider": "claude", "text": "Your last Claude weekly limit renewed with 46% unused." },
+      { "kind": "streak", "provider": "claude", "text": "12 days in a row with Claude." },
+      { "kind": "tokens", "provider": "claude", "text": "Claude Code used 48.2M tokens this week (about $41.90 at API prices)." },
+      { "kind": "extra", "provider": "claude", "text": "An eighth sentence is dropped." },
+      { "kind": "blank", "provider": "claude", "text": "   " }
+    ]
+  },
+  "providers": [
+    { "id": "claude", "name": "Claude", "status": "Ok", "session": "five_hour",
+      "windows": [ { "id": "five_hour", "label": "Current session", "used": 0.42, "at": 1790000000000, "reset": 1790010000000, "points": [],
+        "forecast": { "summary": "Estimated limit: 4:10 PM", "rate": 12.0, "projected": 140.0, "limitAt": 1790017400000, "confidence": "Consistent pace", "lowRate": 8.0, "highRate": 20.0 } } ],
+      "history": [ {
+        "window": "five_hour", "label": "Current session", "streak": 2,
+        "days": [ { "date": "2026-11-08", "used": 0.5, "coverage": 0.8 }, { "date": "2026-11-09", "used": 0.25, "coverage": 0.5 } ],
+        "calendar": [ { "date": "2026-11-07", "used": null }, { "date": "2026-11-08", "used": 0.5, "coverage": 0.8 }, { "date": "2026-11-09", "used": 0.25, "coverage": 0.5 } ],
+        "heat": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        "observed": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        "allTime": { "since": 1700000000000, "used": 37.4, "activeDays": 120, "recordedDays": 131, "hits": 14, "bestDay": "2026-10-02", "bestUsed": 3.2 }
+      } ] }
+  ]
+}

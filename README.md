@@ -6,7 +6,7 @@ Your Claude, Codex, Gemini and Cursor usage limits on your phone, in liquid glas
 
 | You need | File | Where |
 | --- | --- | --- |
-| **Android app** (Android 9 or newer) | `UsageNotch-1.7.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
+| **Android app** (Android 9 or newer) | `UsageNotch-1.8.0.apk` | [Latest release](https://github.com/Arnav-Dugad/UsageNotch-Android/releases/latest) |
 | **UsageNotch for Windows** 2.3 or newer (2.4 for history and pace, 2.5 for the 90-day calendar, 2.6 for settings sync, Stats and tokens), which shares with your phone itself | `UsageNotch.exe` | [Windows releases](https://github.com/Arnav-Dugad/UsageNotch-Windows/releases/latest) |
 
 All downloads, with a short guide: **[arnav-dugad.github.io/UsageNotch-Windows](https://arnav-dugad.github.io/UsageNotch-Windows/)**
@@ -51,6 +51,9 @@ Widgets are glass too: a translucent body that lets your wallpaper through, with
 ## What you get
 
 - **Your plan and every kind of account** (Windows 2.7): a quiet badge shows the plan each provider reports ("Max 5×", "Plus", "Pro", "Edu", "Business"…). Edu, Business and Enterprise seats that report a monthly credit allowance show it as a limit ("30 of 150 credits"), with budgets and alerts like any other. Claude's dollar credit grants read as "$249.99 of $250". Bought credits and free limit resets appear as plain information rows, and a "Where this week went" card shows how Claude splits your week (Claude Code, chat…).
+- **This week** (Windows 2.8): History opens with a plain-English summary your PC writes: how the week compares with the one before, limits you reached, your busiest day and when you usually work.
+- **History kept on your phone**: every sync saves your daily totals on the phone until you delete them, so History covers 7, 30 or 90 days plus all time, and still works while the PC is off. Export them as CSV or delete them in Settings → Data.
+- **Pace ranges**: "limit around 4:10 PM (likely 3:40–4:50 PM)", from the fastest and slowest paces your PC has seen.
 - **Stats you can read at a glance** (Windows 2.7): one full limit is 100% and more than that is a multiple, so "5.6×" means five and a half limits' worth. History says how much of each day your PC actually observed. Usage while the PC was off or asleep, and usage right after a renewal, is now counted, so daily totals are complete.
 
 - **Two styles**: Liquid glass, or **Classic**, the calm grouped look of iOS settings: solid cards on a grouped background, continuous corners, hairline separators and frosted (blur only) floating bars. Settings → Appearance → Style; it switches instantly.
@@ -69,7 +72,7 @@ Widgets are glass too: a translucent body that lets your wallpaper through, with
 - **Chart explorer**: 24 hours or 7 days of readings with the pace as a dashed estimate up to the reset, resets and events marked, your budget as a level. Drag to read any moment; pinch to zoom.
 - **More than one account**: a second Claude or Codex account on your PC appears as its own provider, such as "Codex · Work".
 - **Provider status**: incidents from the Claude, OpenAI and Cursor status pages, relayed by your PC.
-- **History tab**: 7 or 30 days of daily usage with bars that grow in as you scroll (tap one and it morphs into that day's card), total, daily average, busiest day, streak, a 90-day calendar, your providers side by side, and a weekday × hour map of your busiest times. Missing days and hours are shown as no data, never as zero. Needs Windows 2.4; the calendar covers 90 days from Windows 2.5. From Windows 2.6: tokens that Claude Code and Codex used (today, this week, 30 days, by project and model, with an API-price equivalent), unused capacity, limits reached, reset reliability, work sessions and events.
+- **History tab**: 7, 30 or 90 days of daily usage with bars that grow in as you scroll (tap one and it morphs into that day's card), total, daily average, busiest day, streak, a 90-day calendar, your providers side by side, and a weekday × hour map of your busiest times. Missing days and hours are shown as no data, never as zero. Needs Windows 2.4; the calendar covers 90 days from Windows 2.5. From Windows 2.6: tokens that Claude Code and Codex used (today, this week, 30 days, by project and model, with an API-price equivalent), unused capacity, limits reached, reset reliability, work sessions and events.
 - **Live countdown**: an ongoing notification with the percentage and a countdown to the reset, also on the lock screen. On Android 16 it's a Live Update with a status-bar chip.
 - **Usage alerts** at levels you choose (80% and 95% unless you change them), and when the pace says a limit runs out within two hours before it resets. **Reset alerts** when a limit renews, with a gentle vibration. **Before a limit renews**: 10 minutes ahead, for limits you've used half of. **Good moment to start**: when starting now renews mid-way through your busy hours. **Quiet hours** silence them all overnight, and nothing is replayed later.
 - **Live widget countdowns**: larger widgets count down to the next reset every second without waking your phone.

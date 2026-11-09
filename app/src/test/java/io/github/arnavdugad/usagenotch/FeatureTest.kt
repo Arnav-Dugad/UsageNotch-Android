@@ -86,7 +86,9 @@ class FeatureTest {
         assertEquals("openai-api", providerKind("openai_api"))
         assertEquals("anthropic-api", providerKind("anthropic_api"))
         assertEquals(Logos.resource("anthropic_api"), Logos.resource("claude"))
-        assertEquals(Logos.resource("openai_api"), Logos.resource("codex"))
+        // Codex has its own mark; the OpenAI API keeps OpenAI's.
+        assertEquals(R.drawable.logo_codex, Logos.resource("codex")); assertEquals(R.drawable.logo_codex, Logos.resource("codex:work"))
+        assertEquals(R.drawable.logo_openai, Logos.resource("openai_api")); assertEquals(R.drawable.logo_gemini, Logos.resource("gemini"))
         assertTrue(Logos.colored("claude") && Logos.colored("gemini") && !Logos.colored("codex") && !Logos.colored("cursor"))
     }
     @Test fun renewedWindowsNeverShowAStalePercentageAsCurrent() {

@@ -52,7 +52,7 @@ private fun dayTime(at: Long, clock24: Boolean) = DateTimeFormatter.ofPattern(if
 }
 
 /** Grows from 0 to 1 once when shown, for bars that rise in; instant with Reduce motion. */
-@Composable private fun rise(key: Any, reduced: Boolean, duration: Int = 820): Float {
+@Composable internal fun rise(key: Any, reduced: Boolean, duration: Int = 820): Float {
     val a = remember(key) { Animatable(if (reduced) 1f else 0f) }
     LaunchedEffect(key, reduced) { if (reduced) a.snapTo(1f) else a.animateTo(1f, tween(duration, easing = FastOutSlowInEasing)) }
     return a.value

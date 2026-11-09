@@ -61,6 +61,9 @@ class AccountsAndStatsTest {
 
     @Test fun limitsReadInPlainLanguage() {
         assertEquals("48%", LimitText.of(.48)); assertEquals("5.6×", LimitText.of(5.61)); assertEquals("2×", LimitText.of(2.0)); assertEquals("—", LimitText.of(null))
+        // Up to 105% stays a percentage, as on Windows 2.8: a full limit is "100%", never "1×".
+        assertEquals("100%", LimitText.of(1.0)); assertEquals("104%", LimitText.of(1.04)); assertEquals("1.1×", LimitText.of(1.05))
+        assertEquals("100% of the limit", LimitText.ofLimit(1.0)); assertEquals("1.6× the limit", LimitText.ofLimit(1.6))
         assertEquals("5.6 full current session limits' worth", LimitText.worth(5.61, "Current session"))
         assertEquals("of one current session limit", LimitText.worth(.4, "Current session"))
         assertEquals("1.6× more", LimitText.compared(1.28, .8)); assertEquals("30% less", LimitText.compared(.56, .8))

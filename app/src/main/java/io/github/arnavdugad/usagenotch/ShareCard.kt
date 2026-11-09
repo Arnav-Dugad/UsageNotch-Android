@@ -47,7 +47,7 @@ object ShareCard {
         p.textAlign = align; drawText(TextUtils.ellipsize(value, p, maxWidth, TextUtils.TruncateAt.END).toString(), x, baseline, p)
     }
 
-    fun render(context: Context, providers: List<Provider>, usage: TokenUsage?, remaining: Boolean, now: Long, dark: Boolean, classic: Boolean, accentOf: (String) -> Int): Bitmap {
+    fun render(context: Context, providers: List<Provider>, usage: TokenUsage?, remaining: Boolean, now: Long, dark: Boolean, classic: Boolean, report: WeekReport? = null, accentOf: (String) -> Int): Bitmap {
         val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
         val c = Canvas(bitmap); val w = WIDTH.toFloat(); val h = HEIGHT.toFloat()
         val text = if (dark) 0xFFF4F6FA.toInt() else 0xFF101318.toInt()
@@ -69,7 +69,7 @@ object ShareCard {
         c.text("UsageNotch", pad + 116, 182f, 600f, paint(40f, text, bold = true))
         val today = LocalDate.now(); val fmt = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
         c.text("My week in AI", pad, 380f, w - pad * 2, paint(104f, text, bold = true))
-        c.text("${today.minusDays(6).format(fmt)} – ${today.format(fmt)}", pad, 450f, w - pad * 2, paint(42f, muted))
+        c.text(report?.summary?.ifBlank { null } ?: "${today.minusDays(6).format(fmt)} – ${today.format(fmt)}", pad, 450f, w - pad * 2, paint(42f, muted))
 
         // Rings, as on the dock.
         val shown = providers.filter { it.sessionWindow() != null }.take(4)
@@ -97,9 +97,29 @@ object ShareCard {
                 c.text(wk.label, pad + 124, top + 84, 420f, paint(30f, muted))
                 val value = LimitText.of(wk.total)
                 c.text(value, w - pad - 40, top + 56, 300f, paint(56f, accentOf(wk.provider.id).let { Palette.readable(it, if (dark) 0xFF151922.toInt() else 0xFFFFFFFF.toInt()) }, bold = true), Paint.Align.RIGHT)
-                c.text(if ((wk.total ?: 0.0) >= .995) "limits' worth" else "of one limit", w - pad - 40, top + 88, 300f, paint(26f, muted), Paint.Align.RIGHT)
+                c.text(if ((wk.total ?: 0.0) >= LimitText.MULTIPLE) "limits' worth" else "of one limit", w - pad - 40, top + 88, 300f, paint(26f, muted), Paint.Align.RIGHT)
             }
             y += height + 36
+        }
+        // The PC's "This week": its headline and up to three of its sentences, as many as fit.
+        if (report != null) {
+            val inner = w - pad * 2 - 96
+            val headline = layout(report.headline, paint(50f, text, bold = true), inner, 2)
+            val lines = report.insights.take(3).map { layout(it.text, paint(34f, text), inner - 34, 3) to (it.provider?.let(accentOf) ?: accentOf(providers.firstOrNull()?.id ?: "other")) }
+            var height = 56f + headline.height + 30f
+            val shown = mutableListOf<Pair<android.text.StaticLayout, Int>>()
+            for (line in lines) { if (y + height + line.first.height + 26f + 48f > h - 150) break; shown += line; height += line.first.height + 26f }
+            if (y + height + 18f <= h - 150) {
+                panel(y, height + 18f)
+                c.save(); c.translate(pad + 48, y + 56f); headline.draw(c); c.restore()
+                var top = y + 56f + headline.height + 30f
+                shown.forEach { (layout, color) ->
+                    c.drawCircle(pad + 56, top + 22f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+                    c.save(); c.translate(pad + 48 + 34, top); layout.draw(c); c.restore()
+                    top += layout.height + 26f
+                }
+                y += height + 18f + 36
+            }
         }
         val busiest = weeks.mapNotNull { wk -> wk.busiest?.let { wk to it } }.maxByOrNull { it.second.used ?: 0.0 }
         val streak = weeks.maxOfOrNull { it.streak } ?: 0
@@ -122,6 +142,9 @@ object ShareCard {
         c.text("Made with UsageNotch", w / 2, h - 84, w - pad * 2, paint(30f, muted), Paint.Align.CENTER)
         return bitmap
     }
+
+    private fun layout(value: String, p: TextPaint, width: Float, maxLines: Int): android.text.StaticLayout =
+        android.text.StaticLayout.Builder.obtain(value, 0, value.length, p, width.toInt()).setMaxLines(maxLines).setEllipsize(TextUtils.TruncateAt.END).setLineSpacing(0f, 1.12f).build()
 
     /** Writes the image to a private cache file and opens the share sheet. */
     fun share(context: Context, bitmap: Bitmap) {

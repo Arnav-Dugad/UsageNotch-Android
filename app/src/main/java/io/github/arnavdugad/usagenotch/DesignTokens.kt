@@ -11,8 +11,8 @@ object DesignTokens {
     const val LIVE = 0xFF2EE0A8.toInt()
     const val PREVIEW = 0xFF8FB6FF.toInt()
     const val FORECAST = 0xFFBEA4F0.toInt()
-    val brand: Map<String, Int> = mapOf("claude" to 0xFFD97757.toInt(), "anthropic-api" to 0xFFD97757.toInt(), "codex" to 0xFF10A37F.toInt(), "openai-api" to 0xFF10A37F.toInt(), "gemini" to 0xFF4796E3.toInt(), "cursor" to 0xFF9A7CFF.toInt(), "other" to 0xFF8E8E93.toInt())
-    val accentChoices: List<Int> = listOf(0xFFD97757.toInt(), 0xFFFF6B6B.toInt(), 0xFFFFB547.toInt(), 0xFF34C759.toInt(), 0xFF10A37F.toInt(), 0xFF32ADE6.toInt(), 0xFF4796E3.toInt(), 0xFF7A5CFF.toInt(), 0xFFBF5AF2.toInt(), 0xFFFF2D92.toInt())
+    val brand: Map<String, Int> = mapOf("claude" to 0xFFD97757.toInt(), "anthropic-api" to 0xFFD97757.toInt(), "codex" to 0xFF10A37F.toInt(), "openai-api" to 0xFF10A37F.toInt(), "gemini" to 0xFF3186FF.toInt(), "cursor" to 0xFF9A7CFF.toInt(), "other" to 0xFF8E8E93.toInt())
+    val accentChoices: List<Int> = listOf(0xFFD97757.toInt(), 0xFFFF6B6B.toInt(), 0xFFFFB547.toInt(), 0xFF34C759.toInt(), 0xFF10A37F.toInt(), 0xFF32ADE6.toInt(), 0xFF3186FF.toInt(), 0xFF7A5CFF.toInt(), 0xFFBF5AF2.toInt(), 0xFFFF2D92.toInt())
     val ambient: List<Int> = listOf(0xFF7A5CFF.toInt(), 0xFF2E9BFF.toInt())
     object Dark {
         const val background = 0xFF0A0C11.toInt()
@@ -52,6 +52,8 @@ object DesignTokens {
         const val glassRim = 0xCCFFFFFF.toInt()
         const val ambientAlpha = 0.3f
     }
+    object TypeScale { const val display = 30.0f; const val title = 20.0f; const val headline = 15.0f; const val body = 13.0f; const val callout = 12.5f; const val caption = 11.5f; const val micro = 10.5f; const val number = 26.0f }
+    object Spacing { const val xs = 4.0f; const val s = 8.0f; const val m = 12.0f; const val l = 16.0f; const val xl = 24.0f; const val xxl = 32.0f; const val page = 28.0f }
     object Radius { const val card = 26.0f; const val inner = 18.0f; const val control = 14.0f; const val chip = 999.0f }
     object Motion {
         const val fastMs = 160

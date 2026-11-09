@@ -284,7 +284,7 @@ fun extraText(e: Extra): Pair<String, String?> {
                 val color = when (st.state) { Budgets.State.Over -> Color(Palette.DANGER); Budgets.State.Pace, Budgets.State.Near -> Color(Palette.WARNING); else -> t.muted }
                 Text(st.text, fontSize = 11.5.sp, color = Color(Palette.readable(color.toArgb(), surface)), modifier = Modifier.padding(top = 4.dp))
             }
-            forecastLine(w.forecast, now, clock24)?.let { line ->
+            forecastLine(w.forecast, now, clock24, w.used, w.reset)?.let { line ->
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.AutoMirrored.Outlined.TrendingUp, null, tint = t.faint, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(5.dp))
                     Text(line, fontSize = 11.5.sp, color = t.muted)
@@ -294,10 +294,14 @@ fun extraText(e: Extra): Pair<String, String?> {
     } }
 }
 
-/** The desktop's pace estimate in one line, or null while it is still learning or unavailable. */
-fun forecastLine(f: Forecast?, now: Long, clock24: Boolean): String? {
+/**
+ * The desktop's pace estimate in one line, or null while it is still learning or unavailable. With the window's [used]
+ * and [reset], a limit time carries its likely range: "At this pace: limit around 4:10 PM (likely 3:40–4:50 PM)".
+ */
+fun forecastLine(f: Forecast?, now: Long, clock24: Boolean, used: Double? = null, reset: Long? = null): String? {
     f ?: return null
-    f.limitAt?.let { return if (it <= now) "At this pace: limit reached by now" else "At this pace: limit around ${ClockText.time(it, clock24)}" }
+    f.limitAt?.let { return if (it <= now) "At this pace: limit reached by now" else "At this pace: limit around ${ClockText.time(it, clock24)}" +
+        (used?.let { u -> PaceRange.of(f, u, reset, now, clock24)?.let { r -> " ($r)" } } ?: "") }
     return f.summary.takeIf { it.startsWith("Estimated") || it == "No increase observed" || it == "Reported limit reached" }?.let { if (it.startsWith("Estimated")) "At this pace: ${it.removePrefix("Estimated ")}" else it }
 }
 
@@ -352,3 +356,39 @@ fun forecastLine(f: Forecast?, now: Long, clock24: Boolean): String? {
     }
 }
 private fun Modifier.toggleableRow(value: Boolean, changed: (Boolean) -> Unit) = this.then(Modifier.clickable(role = Role.Switch) { changed(!value) }).semantics { toggleableState = androidx.compose.ui.state.ToggleableState(value) }
+
+/**
+ * The pace band as a time range (docs/PHONE-PROTOCOL.md, "Forecast ranges"): at the fastest observed pace ([Forecast.highRate])
+ * the limit arrives earliest, at the slowest ([Forecast.lowRate]) latest. "likely 3:40–4:50 PM" when both come before the
+ * reset and at least 10 minutes apart, "as early as 3:40 PM" when only the early one does, otherwise nothing.
+ */
+object PaceRange {
+    private const val MIN_GAP = 10 * 60_000L
+    /** When the limit would be reached from [used] at [ratePerHour] percentage points an hour, or null at no pace. */
+    fun at(used: Double, ratePerHour: Double?, now: Long): Long? {
+        if (ratePerHour == null || !ratePerHour.isFinite() || ratePerHour <= 0 || used >= 1) return null
+        return now + kotlin.math.round((1 - used) / (ratePerHour / 100) * 3_600_000).toLong()
+    }
+    fun bounds(f: Forecast?, used: Double, reset: Long?, now: Long): Pair<Long, Long?>? {
+        if (f?.limitAt == null || reset == null || f.limitAt <= now) return null
+        val early = at(used, f.highRate, now)?.takeIf { it < reset } ?: return null
+        val late = at(used, f.lowRate, now)?.takeIf { it < reset }
+        if (late != null && late - early < MIN_GAP) return early to early
+        return early to late
+    }
+    fun of(f: Forecast?, used: Double, reset: Long?, now: Long, clock24: Boolean): String? {
+        val (early, late) = bounds(f, used, reset, now) ?: return null
+        return when {
+            late == null -> "as early as ${ClockText.time(early, clock24)}"
+            late == early -> null
+            else -> "likely " + span(early, late, clock24)
+        }
+    }
+    /** "3:40–4:50 PM", "11:50 AM–12:30 PM", "15:40–16:50". */
+    fun span(from: Long, to: Long, clock24: Boolean): String {
+        val a = ClockText.time(from, clock24); val b = ClockText.time(to, clock24)
+        if (clock24) return "$a–$b"
+        val suffixA = a.substringAfterLast(' '); val suffixB = b.substringAfterLast(' ')
+        return if (suffixA == suffixB) "${a.substringBeforeLast(' ')}–$b" else "$a–$b"
+    }
+}

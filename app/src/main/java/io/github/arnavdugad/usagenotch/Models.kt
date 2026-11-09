@@ -50,13 +50,29 @@ data class Reliability(val periods: Int, val fixed: Int, val moved: Int, val ave
 data class HistoryEvent(val at: Long, val kind: String, val text: String)
 /** A run of continuous readings on the PC: [used] percentage points consumed, [peak] the fastest pace in points an hour. */
 data class WorkSession(val start: Long, val end: Long, val used: Double, val peak: Double)
+/**
+ * Everything recorded for one window: from the PC (feature "alltime", Windows 2.8), or worked out from the days saved on
+ * this phone when the PC doesn't send it ([onPhone]). [used] and [bestUsed] are in limits: 2.5 = two and a half full
+ * limits. [hits] counts limit periods that reached 99.5%; null when only this phone's daily totals are known.
+ */
+data class AllTime(val since: Long, val used: Double, val activeDays: Int, val recordedDays: Int, val hits: Int?, val bestDay: String?, val bestUsed: Double, val onPhone: Boolean = false)
+/** "This week" for one provider's main limit (feature "report"): the last 7 local days against the 7 before. */
+data class ReportRow(val id: String, val name: String, val window: String, val label: String, val used: Double?, val previous: Double?,
+    /** (used - previous) / previous, or null when the PC couldn't compare the weeks fairly. */
+    val change: Double?, val activeDays: Int, val hits: Int, val busiestDay: String?, val busiestUsed: Double?, val streak: Int)
+/** A sentence about the week, written on the PC so both apps say the same thing. */
+data class ReportLine(val kind: String, val provider: String?, val text: String)
+data class WeekReport(val from: String, val to: String, val generatedAt: Long, val headline: String, val summary: String, val providers: List<ReportRow>, val insights: List<ReportLine>)
 data class History(
     val window: String, val label: String, val days: List<Day>, val heat: List<Double>, val observed: List<Int>, val streak: Int, val calendar: List<Day> = emptyList(),
     /** Protocol 2: seven days of readings, oldest first. */
     val trend: List<Reading> = emptyList(), val unused: List<UnusedPeriod> = emptyList(), val hits: List<LimitHit> = emptyList(),
     val reliability: Reliability? = null, val events: List<HistoryEvent> = emptyList(), val sessions: List<WorkSession> = emptyList(),
+    val allTime: AllTime? = null,
 ) {
     fun last(n: Int) = days.takeLast(n)
+    /** The last [n] days for the 7, 30 and 90 day ranges: from the calendar (90 days, or more with this phone's saved days), else the 30 days. */
+    fun range(n: Int) = calendar.ifEmpty { days }.takeLast(n)
     /** The busiest observed cells, most first, as (weekday 0=Sunday, hour, consumption). */
     fun busiest(count: Int = 3) = heat.indices.filter { observed.getOrElse(it) { 0 } > 0 && heat[it] > .0001 }.sortedByDescending { heat[it] }.take(count).map { Triple(it / 24, it % 24, heat[it]) }
 }
@@ -107,13 +123,15 @@ data class Snapshot(
     /** Negotiated protocol: absent (1) from UsageNotch for Windows 2.3–2.5, 2 from 2.6. Capabilities are read from [features], never inferred. */
     val protocol: Int = 1, val features: Set<String> = emptySet(),
     val shared: Map<String, SharedEntry> = emptyMap(), val incidents: List<Incident> = emptyList(), val tokens: TokenUsage? = null,
+    /** "This week", from Windows 2.8 (feature "report"). */
+    val report: WeekReport? = null,
 ) {
     /** Time of the most recent reading the PC observed, used to never replace newer data with older data. */
     fun newestReading() = providers.flatMap { it.windows }.maxOfOrNull { it.at } ?: 0L
     fun has(feature: String) = feature in features
     companion object {
         /** What this app understands, sent to the PC so it can include the heavier protocol 2 fields. */
-        const val FEATURES = "refresh,settings,trend,insights,tokens,incidents,accounts"
+        const val FEATURES = "refresh,settings,trend,insights,tokens,incidents,accounts,report,alltime"
         private fun <T> JSONObject.list(key: String, max: Int, item: (JSONObject) -> T?): List<T> {
             val a = optJSONArray(key) ?: return emptyList()
             require(a.length() <= max) { "Too many $key" }
@@ -131,6 +149,23 @@ data class Snapshot(
                     s.optBoolean("allDevices", false), s.time("lifetime")?.coerceIn(0, 1_000_000_000_000_000L), s.time("peakDaily")?.coerceIn(0, 1_000_000_000_000_000L),
                     if (s.has("longestStreak") && !s.isNull("longestStreak")) s.getInt("longestStreak").coerceIn(0, 100_000) else null)
             })
+        }.getOrNull() }
+        private fun JSONObject.clean(key: String, max: Int): String? = text(key, max * 2)?.filterNot { it.isISOControl() }?.trim()?.take(max)?.ifBlank { null }
+        private fun JSONObject.limits(key: String): Double? = number(key)?.takeIf { it >= 0 && it <= 100_000 }
+        private val isoDate = Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")
+        private fun JSONObject.date(key: String): String? = text(key, 10)?.takeIf { isoDate.matches(it) }
+        private fun parseReport(root: JSONObject): WeekReport? = root.optJSONObject("report")?.let { r -> runCatching {
+            WeekReport(r.date("from")!!, r.date("to")!!, r.optLong("generatedAt", 0), r.clean("headline", 80)!!, r.clean("summary", 120) ?: "",
+                r.list("providers", 16) { p ->
+                    ReportRow(p.getString("id").take(80), p.clean("name", 60) ?: p.getString("id").take(60), p.text("window", 100) ?: "", p.clean("label", 80) ?: "",
+                        p.limits("used"), p.limits("previous"), p.number("change")?.takeIf { it >= -1 && it <= 100_000 },
+                        p.optInt("activeDays").coerceIn(0, 7), p.optInt("hits").coerceIn(0, 1_000), p.date("busiestDay"), p.limits("busiestUsed"), p.optInt("streak").coerceIn(0, 100_000))
+                },
+                r.list("insights", 16) { i -> i.clean("text", 240)?.let { ReportLine(i.text("kind", 20) ?: "", i.text("provider", 80), it) } }.take(7))
+        }.getOrNull() }
+        private fun parseAllTime(h: JSONObject): AllTime? = h.optJSONObject("allTime")?.let { a -> runCatching {
+            AllTime(a.long("since"), (a.limits("used") ?: 0.0), a.optInt("activeDays").coerceIn(0, 1_000_000), a.optInt("recordedDays").coerceIn(0, 1_000_000),
+                a.optInt("hits").coerceIn(0, 1_000_000), a.date("bestDay"), a.limits("bestUsed") ?: 0.0)
         }.getOrNull() }
         private fun parseShared(root: JSONObject): Map<String, SharedEntry> = root.optJSONObject("shared")?.let { SharedSettings.parseEntries(it) } ?: emptyMap()
         private fun parseIncidents(root: JSONObject): List<Incident> = runCatching { root.list("incidents", 16) { i ->
@@ -160,7 +195,8 @@ data class Snapshot(
                 History(h.getString("window").take(100), h.getString("label").take(80), daysOf(days),
                     (0 until 168).map { heat.getDouble(it).takeIf { v -> v.isFinite() && v >= 0 } ?: 0.0 }, (0 until 168).map { observed.getInt(it).coerceAtLeast(0) }, h.optInt("streak", 0).coerceIn(0, 10_000),
                     calendar?.let { daysOf(it) } ?: emptyList(),
-                    extra?.trend.orEmpty(), extra?.unused.orEmpty(), extra?.hits.orEmpty(), extra?.reliability, extra?.events.orEmpty(), extra?.sessions.orEmpty())
+                    extra?.trend.orEmpty(), extra?.unused.orEmpty(), extra?.hits.orEmpty(), extra?.reliability, extra?.events.orEmpty(), extra?.sessions.orEmpty(),
+                    parseAllTime(h))
             }.getOrNull() }
         }
         /** Internet sync details handed over the pinned local link: the new relay, "off", or null when the PC doesn't say. */
@@ -212,7 +248,7 @@ data class Snapshot(
             }, root.optString("source").take(40).ifBlank { null }, root.optString("appVersion").take(20).ifBlank { null },
                 root.optInt("protocol", 1).coerceIn(1, 100),
                 root.optJSONArray("features")?.let { f -> require(f.length() <= 64); (0 until f.length()).map { f.getString(it).take(40) }.toSet() } ?: emptySet(),
-                parseShared(root), parseIncidents(root), parseTokens(root))
+                parseShared(root), parseIncidents(root), parseTokens(root), parseReport(root))
         }
     }
 }
@@ -335,15 +371,17 @@ fun amountText(usedAmount: Double?, limitAmount: Double?, unit: String?, detail:
  * ("1.6×", "2×"), so a week of 561% reads as "5.6×" — five and a half limits' worth.
  */
 object LimitText {
+    /** Percentages up to 105% ("100%", never "1×"), multiples from there ("1.6×"), as on Windows 2.8. */
+    const val MULTIPLE = 1.05
     fun of(fraction: Double?): String = when {
         fraction == null -> "—"
-        fraction >= .995 -> "%.1f".format(Locale.US, fraction).removeSuffix(".0") + "×"
+        fraction >= MULTIPLE -> "%.1f".format(Locale.US, fraction).removeSuffix(".0") + "×"
         else -> "${(fraction * 100).roundToInt()}%"
     }
     /** "5.6 full current session limits' worth" or "of one current session limit". */
     fun worth(fraction: Double?, label: String): String {
         val name = label.lowercase(Locale.ENGLISH)
-        return if (fraction != null && fraction >= .995) "%.1f".format(Locale.US, fraction).removeSuffix(".0") + " full $name limits' worth" else "of one $name limit"
+        return if (fraction != null && fraction >= MULTIPLE) "%.1f".format(Locale.US, fraction).removeSuffix(".0") + " full $name limits' worth" else "of one $name limit"
     }
     /** "1.6× more" or "30% less" than the average. */
     fun compared(used: Double, average: Double): String = when {
@@ -352,6 +390,8 @@ object LimitText {
         else -> "${((1 - used / average) * 100).roundToInt()}% less"
     }
     fun coverage(c: Double?) = c?.let { "${(it * 100).roundToInt()}% of the day observed" }
+    /** "48% of the limit", or "1.3× the limit" from one full limit up. */
+    fun ofLimit(fraction: Double?): String = if (fraction != null && fraction >= MULTIPLE) "${of(fraction)} the limit" else "${of(fraction)} of the limit"
 }
 fun readingState(p: Provider, w: UsageWindow, now: Long): String = when {
     w.at > now + 60_000 -> "Check PC clock"

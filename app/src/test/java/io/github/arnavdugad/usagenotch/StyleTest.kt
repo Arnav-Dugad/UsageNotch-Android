@@ -40,6 +40,8 @@ class StyleTest {
             compose.onAllNodesWithText("Current session").onFirst().assertExists()
             screenshot("20-$name-overview")
             compose.onNodeWithContentDescription("History").performClick()
+            compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasText("This week"))
+            compose.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasText("Share your week"))
             compose.onNodeWithText("Share your week").assertExists()
             screenshot("21-$name-history")
             compose.onNodeWithContentDescription("Settings").performClick()
@@ -100,6 +102,10 @@ class StyleTest {
             file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         assertTrue(ShareCard.weeks(sample.providers).isNotEmpty())
+        // With the PC's "This week": its headline and sentences join the story.
+        val withReport = ShareCard.render(context, sample.providers, sample.tokens, true, sample.generatedAt, true, false, sample.report) { Accents.default(it) }
+        File("build/screenshots/share-report-dark.png").outputStream().use { withReport.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertFalse("the report changes the picture", withReport.sameAs(ShareCard.render(context, sample.providers, sample.tokens, true, sample.generatedAt, true, false) { Accents.default(it) }))
     }
     private fun screenshot(name: String) {
         compose.waitForIdle()

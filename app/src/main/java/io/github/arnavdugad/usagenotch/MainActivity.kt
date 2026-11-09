@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -154,6 +155,10 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
     var demoBudgets by remember { mutableStateOf(emptyList<Budget>()) }
     var demoAccents by remember { mutableStateOf(emptyMap<String, Int?>()) }
     val historyState = rememberHistoryState()
+    // This phone's permanent history, reloaded whenever a new snapshot arrives or you export or delete it.
+    var stored by remember { mutableStateOf(StoredHistory.Empty) }; var storedStats by remember { mutableStateOf<StoredStats?>(null) }
+    var storedVersion by remember { mutableIntStateOf(0) }; var deleteHistory by remember { mutableStateOf(false) }; var dataNote by remember { mutableStateOf("") }
+    var whatsNew by remember { mutableStateOf(WhatsNew.pending(context)) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val pageStates = List(TABS.size) { rememberLazyListState() }
     val listState = pageStates[0]
@@ -196,6 +201,17 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                 if (current != seen) { seen = current; reload() }
                 delay(1000)
             }
+        }
+    }
+    LaunchedEffect(snapshot?.generatedAt, storedVersion) {
+        withContext(Dispatchers.IO) { runCatching { LocalHistory.open(context) { it.load() to it.stats() } }.getOrNull() }?.let { (h, st) -> stored = h; storedStats = st }
+    }
+    val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) scope.launch {
+            dataNote = withContext(Dispatchers.IO) { runCatching {
+                val rows = context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { out -> LocalHistory.open(context) { it.exportCsv(out) } } ?: error("Could not open file")
+                "Exported $rows day${if (rows == 1) "" else "s"}"
+            }.getOrDefault("Couldn't export. Try another location.") }
         }
     }
     LaunchedEffect(incoming) { incoming?.let { readUri(it); page = 0; incomingHandled() } }
@@ -242,6 +258,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
         Color(if (demo && providerKind(id) in demoAccents) demoAccents[providerKind(id)] ?: Accents.default(id) else Accents.of(repo.prefs, id)) } } }
     fun budgetsFor(id: String) = budgets.filter { it.provider == id }
     val day = DayKey.decode(dayOpen)
+    val historyProviders = remember(demo, providers, snapshot, stored) { if (demo) providers else LocalHistory.enrich(snapshot?.providers.orEmpty(), stored) }
 
     // Back from History, Widgets or Settings returns to Overview; the page shrinks with the predictive back gesture.
     var pageBack by remember { mutableFloatStateOf(0f) }
@@ -325,7 +342,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                                 } }
                                             }
                                         }
-                                        1 -> historyPage(if (demo) providers else snapshot?.providers.orEmpty(), historyState, clock24, reduced, day, { dayOpen = it.encode() }, shown?.tokens)
+                                        1 -> historyPage(historyProviders, historyState, clock24, reduced, day, { dayOpen = it.encode() }, shown?.tokens, shown?.report)
                                         2 -> {
                                             item { WidgetPreviews(shown ?: demoSnapshot(), now, t.dark, remaining, clock24, offline && !demo, budgets) }
                                             item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -345,6 +362,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                                             checkUpdates, { checkUpdates = it; save("checkUpdates", it); update = Updates.available(context); Updates.schedule(context) }, reducedMotion = reduced, openUrl = openUrl,
                                             style = style, setStyle = { next -> repo.prefs.edit().putString("uiStyle", next.key).apply(); styleChanged(next); runCatching { updateWidgets(context) } },
                                             autoUpdate = autoUpdate, setAutoUpdate = { autoUpdate = it; Updates.setAutomatic(context, it) }, update = update,
+                                            data = DataExtras(storedStats, dataNote, { dataNote = ""; exportCsv.launch("usagenotch-history-${java.time.LocalDate.now()}.csv") }, { deleteHistory = true }, { whatsNew = true }),
                                             extras = SettingsExtras(preReset, goodMoment, levels.first, levels.second, quiet.first, quiet.second, quiet.third,
                                                 syncLine = if (snapshot?.has("settings") == true && pairing != null) (if (pendingSettings > 0) "Settings sync · $pendingSettings ${if (pendingSettings == 1) "change waits" else "changes wait"} for your PC's Wi-Fi" else "Budgets, colours, names and alerts sync with ${pairing?.name}") else null,
                                                 providers = snapshot?.providers.orEmpty(),
@@ -361,7 +379,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
                         }
                     }
                 }
-                DayOverlay(day, if (demo) providers else snapshot?.providers.orEmpty()) { dayOpen = null }
+                DayOverlay(day, historyProviders) { dayOpen = null }
             }
             }
             }
@@ -383,6 +401,7 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
             }
         }
         if (busy && !refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().statusBarsPadding().align(Alignment.TopCenter), color = t.accent, trackColor = Color.Transparent)
+        WhatsNewSheet(whatsNew, reduced) { whatsNew = false; WhatsNew.markSeen(context) }
         if (scanning) ScannerScreen(reduced, { code -> scanning = false; importPairing { code } }) { scanning = false }
     }
     }
@@ -393,7 +412,11 @@ private val TABS = listOf(TabItem("Overview", Icons.Outlined.DonutLarge), TabIte
             confirmButton = { TextButton(onClick = { val text = confirmText; confirm = null; importPairing { text } }) { Text("Pair") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } })
     }
-    if (disconnect) AlertDialog(onDismissRequest = { disconnect = false }, title = { Text("Disconnect this phone?") }, text = { Text("This clears its pairing and saved readings. Your Windows history stays untouched.") }, confirmButton = { TextButton(onClick = { scope.launch { repo.disconnect(); afterSync(); disconnect = false } }) { Text("Disconnect") } }, dismissButton = { TextButton(onClick = { disconnect = false }) { Text("Cancel") } })
+    if (deleteHistory) AlertDialog(onDismissRequest = { deleteHistory = false }, icon = { Icon(Icons.Outlined.DeleteOutline, null) }, title = { Text("Delete history on this phone?") },
+        text = { Text("This removes the ${storedStats?.days ?: 0} days saved on this phone. Your PC keeps its own history, and its last 90 days come back the next time it syncs.") },
+        confirmButton = { TextButton(onClick = { deleteHistory = false; scope.launch { withContext(Dispatchers.IO) { runCatching { LocalHistory.open(context) { it.clear() } } }; dataNote = "History on this phone deleted"; storedVersion++ } }) { Text("Delete", color = Color(Palette.DANGER)) } },
+        dismissButton = { TextButton(onClick = { deleteHistory = false }) { Text("Cancel") } })
+    if (disconnect) AlertDialog(onDismissRequest = { disconnect = false }, title = { Text("Disconnect this phone?") }, text = { Text("This clears its pairing and latest readings. History saved on this phone stays until you delete it in Settings → Data, and your Windows history is untouched.") }, confirmButton = { TextButton(onClick = { scope.launch { repo.disconnect(); afterSync(); disconnect = false } }) { Text("Disconnect") } }, dismissButton = { TextButton(onClick = { disconnect = false }) { Text("Cancel") } })
 }
 
 /**
@@ -451,7 +474,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
     remaining: Boolean, setRemaining: (Boolean) -> Unit, clock24: Boolean, setClock24: (Boolean) -> Unit, reduced: Boolean, setReduced: (Boolean) -> Unit,
     checkUpdates: Boolean, setCheckUpdates: (Boolean) -> Unit, reducedMotion: Boolean, openUrl: (String) -> Unit,
     style: UiStyle, setStyle: (UiStyle) -> Unit, autoUpdate: Boolean, setAutoUpdate: (Boolean) -> Unit, update: String?,
-    extras: SettingsExtras,
+    extras: SettingsExtras, data: DataExtras,
 ) {
     item { Group {
         Column(Modifier.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -519,12 +542,19 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
         Divider()
         SettingToggle("Reduce motion", null, reduced, setReduced)
     } }
+    item { SectionLabel("Data") }
+    item { Group { DataRow(data) } }
     item { SectionLabel("Updates") }
     item { Group {
         SettingToggle("Check for updates", null, checkUpdates, setCheckUpdates)
         if (checkUpdates) { Divider(); SettingToggle("Install updates automatically", "Downloads on Wi-Fi, checks the published checksum and signature, then installs", autoUpdate, setAutoUpdate) }
         Divider()
         UpdateRow(update)
+        Divider()
+        Row(Modifier.fillMaxWidth().clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = data.whatsNew).padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(WhatsNew.TITLE, fontSize = 15.5.sp, color = LocalTokens.current.text, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = LocalTokens.current.faint)
+        }
     } }
     item { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text("UsageNotch ${BuildConfig.VERSION_NAME}", color = LocalTokens.current.faint, fontSize = 12.sp)
@@ -568,6 +598,32 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsPage(
             GlassButton({ openUrl(Updates.RELEASES) }) { Text("What's new") }
         }
     } }
+}
+
+/** Settings → Data: what's saved on this phone, and exporting or deleting it. */
+class DataExtras(val stats: StoredStats?, val note: String, val export: () -> Unit, val delete: () -> Unit, val whatsNew: () -> Unit)
+
+@Composable private fun DataRow(data: DataExtras) {
+    val t = LocalTokens.current; val stats = data.stats
+    Column(Modifier.padding(vertical = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Storage, null, tint = t.accent, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("History on this phone", fontSize = 15.5.sp, color = t.text)
+                val since = stats?.since?.let { runCatching { java.time.LocalDate.parse(it).format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", java.util.Locale.ENGLISH)) }.getOrDefault(it) }
+                Text(when {
+                    stats == null -> "Checking…"
+                    stats.days == 0 -> "Nothing saved yet. Daily totals are saved each time your PC syncs."
+                    else -> "${stats.days} day${if (stats.days == 1) "" else "s"} since $since · kept until you delete them"
+                }, fontSize = 12.sp, lineHeight = 16.sp, color = t.faint)
+            }
+        }
+        if (data.note.isNotBlank()) Text(data.note, fontSize = 12.sp, color = t.accent, modifier = Modifier.padding(top = 8.dp))
+        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassButton(data.export, Modifier.weight(1f), enabled = (stats?.days ?: 0) > 0) { Icon(Icons.Outlined.FileDownload, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Export CSV") }
+            GlassButton(data.delete, Modifier.weight(1f), enabled = (stats?.days ?: 0) > 0) { Text("Delete…", color = if ((stats?.days ?: 0) > 0) Color(Palette.DANGER) else t.faint) }
+        }
+    }
 }
 
 /** Settings that arrived with protocol 2: reminders, alert levels, quiet hours and the provider order (all but reminders sync with the PC). */
@@ -676,16 +732,54 @@ internal fun demoSnapshot(): Snapshot {
             account = "Sample account", updatedAt = now, manageUrl = "https://claude.ai/settings/usage", session = "five_hour", weekly = "seven_day", plan = "Max 5×",
             breakdown = listOf(Share("Claude Code", 82.0), Share("Claude", 18.0)),
             extras = listOf(Extra("extra_usage", "Usage credits", "Pay-as-you-go usage after plan limits", null, 3.5, null, "USD")),
-            history = listOf(demoInsights(demoHistory("five_hour", "Current session", 1.0, 3), now, 5 * 3_600_000L, 3), demoInsights(demoHistory("seven_day", "All models", .16, 5), now, 7 * 86_400_000L, 5))),
+            history = listOf(demoInsights(demoHistory("five_hour", "Current session", 1.0, 3), now, 5 * 3_600_000L, 3).withDemoAllTime(now, 61.4, 158, 171, 23),
+                demoInsights(demoHistory("seven_day", "All models", .16, 5), now, 7 * 86_400_000L, 5).withDemoAllTime(now, 9.8, 160, 171, 2))),
         Provider("codex", "Codex", "Ok", listOf(window("codex-primary", "5-hour limit", .16, now + 11_400_000), window("codex-secondary", "Weekly limit", .49, now + 401_840_000)), updatedAt = now, manageUrl = "https://chatgpt.com/codex/settings/usage", session = "codex-primary", weekly = "codex-secondary",
-            history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11)), plan = "Plus"),
+            history = listOf(demoHistory("codex-primary", "5-hour limit", .7, 11).withDemoAllTime(now, 37.2, 120, 131, 9)), plan = "Plus"),
         Provider("gemini", "Gemini", "Ok", listOf(window("gemini-2.5-pro", "Gemini 2.5 Pro", .72, now + 50_000_000)), updatedAt = now),
         Provider("codex:work", "Codex · Work", "Ok", listOf(window("codex-primary", "5-hour limit", .58, now + 4_100_000, forecast = Forecast("Estimated 92.0% used at reset", 22.0, 92.0, null, "Consistent pace")), window("codex-secondary", "Weekly limit", .33, now + 301_840_000), UsageWindow("codex-monthly", "Monthly limit", .2, now, now + 20 * 86_400_000L, emptyList(), "Credits shared across Codex and other ChatGPT agents", 30.0, 150.0, "credits")),
             updatedAt = now, session = "codex-primary", weekly = "codex-secondary", kind = "codex", accountLabel = "Work", plan = "Edu",
             extras = listOf(Extra("codex-reset-credits", "Free limit reset", "Full reset (Weekly + 5 hr) · use by " + java.time.LocalDate.now().plusDays(6).format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.ENGLISH)) + " · redeem it in Codex", null, null, null, null))),
     ), "sample", protocol = 2, features = Snapshot.FEATURES.split(',').toSet(),
         incidents = listOf(Incident("claude", "Elevated errors on Claude Opus", "minor", "monitoring", "https://status.claude.com", now - 1_800_000)),
-        tokens = demoTokens(now))
+        tokens = demoTokens(now)).let { it.copy(report = demoReport(it.providers)) }
+}
+
+/** Sample all-time totals: the busiest saved day and figures in the PC's units (limits). */
+private fun History.withDemoAllTime(now: Long, used: Double, active: Int, recorded: Int, hits: Int): History {
+    val best = calendar.filter { it.used != null }.maxByOrNull { it.used!! }
+    return copy(allTime = AllTime(now - recorded * 86_400_000L, used, active, recorded, hits, best?.date, best?.used ?: 0.0))
+}
+
+/** A sample "This week" worked out from the sample history the way the PC does it, so its numbers match History. */
+internal fun demoReport(providers: List<Provider>): WeekReport {
+    val today = java.time.LocalDate.now(); val from = today.minusDays(6); val fmt = java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.ENGLISH)
+    val rows = providers.filter { ':' !in it.id }.mapNotNull { p ->
+        val h = p.history.firstOrNull { it.window == p.sessionWindow()?.id } ?: return@mapNotNull null
+        val week = h.range(7); val before = h.range(14).take(7)
+        val used = week.mapNotNull { it.used }.takeIf { it.isNotEmpty() }?.sum(); val previous = before.mapNotNull { it.used }.takeIf { it.isNotEmpty() }?.sum()
+        val busiest = week.filter { (it.used ?: 0.0) > .0001 }.maxByOrNull { it.used!! }
+        ReportRow(p.id, p.name, h.window, h.label, used, previous, if (used != null && previous != null && previous >= .05) (used - previous) / previous else null,
+            week.count { (it.used ?: 0.0) > .0001 }, h.hits.count { ClockText.localDate(it.at) >= from }, busiest?.date, busiest?.used, h.streak)
+    }
+    val lines = mutableListOf<ReportLine>()
+    rows.forEach { r -> r.change?.let { c -> lines += ReportLine("change", r.id, when {
+        c >= .1 -> "You used ${r.name} ${kotlin.math.round(c * 100).toInt()}% more than the week before."
+        c <= -.1 -> "You used ${r.name} ${kotlin.math.round(-c * 100).toInt()}% less than the week before."
+        else -> "Your ${r.name} use was steady, within 10% of the week before."
+    }) } }
+    rows.filter { it.hits > 0 }.forEach { r -> lines += ReportLine("hits", r.id, "You reached the ${r.name} session limit ${if (r.hits == 1) "once" else if (r.hits == 2) "twice" else "${r.hits} times"} this week.") }
+    rows.filter { it.busiestUsed != null }.maxByOrNull { it.busiestUsed!! }?.let { r ->
+        val day = java.time.LocalDate.parse(r.busiestDay).dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH)
+        lines += ReportLine("busiest", r.id, if (r.busiestUsed!! >= LimitText.MULTIPLE) "$day was your busiest day, with ${LimitText.of(r.busiestUsed).removeSuffix("×")} full ${r.name} session limits."
+            else "$day was your busiest day, using ${kotlin.math.round(r.busiestUsed * 100).toInt()}% of a ${r.name} session limit.")
+    }
+    lines += ReportLine("hours", "claude", "You're usually busiest on Tuesdays around 2 PM.")
+    lines += ReportLine("tokens", "claude", "Claude Code used 48.2M tokens this week (about $41.90 at API prices).")
+    val changes = rows.mapNotNull { it.change }
+    val headline = if (changes.isEmpty()) "Your week" else changes.average().let { if (it > .1) "A busier week than the last" else if (it < -.1) "A quieter week than the last" else "A steady week" }
+    val active = rows.flatMap { p -> providers.first { it.id == p.id }.history.first { it.window == p.window }.range(7).filter { (it.used ?: 0.0) > .0001 }.map { it.date } }.toSet().size
+    return WeekReport(from.toString(), today.toString(), System.currentTimeMillis(), headline, "${from.format(fmt)} – ${today.format(fmt)} · $active active day${if (active == 1) "" else "s"}", rows, lines.take(7))
 }
 
 /** Sample protocol 2 insights for a history: 7 days of readings, finished periods, limits reached, reliability, sessions and events. */
